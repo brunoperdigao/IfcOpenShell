@@ -200,6 +200,7 @@ class SvgWriter:
         return self
 
     def draw_section_level_annotation(self, obj):
+        display_data = DecoratorData.get_level_display_data(obj)
         x_offset = self.raw_width / 2
         y_offset = self.raw_height / 2
         matrix_world = obj.matrix_world
@@ -233,9 +234,29 @@ class SvgWriter:
                 rl /= unit_scale
                 rl = ifcopenshell.util.geolocation.auto_z2e(tool.Ifc.get(), rl)
                 rl *= unit_scale
-                rl = "{:.3f}m".format(rl)
+                # rl = "{:.3f}m".format(rl)
+                rl = helper.format_distance(rl, precision=self.precision, decimal_places=self.decimal_places)
+                if float(rl) > 0:
+                    rl = "+"+rl
+            
             text_style = SvgWriter.get_box_alignment_parameters("bottom-left")
-            self.svg.add(self.svg.text(f"RL +{rl}", insert=tuple(text_position), class_="SECTIONLEVEL", **text_style))
+            
+            if display_data['add_prefix']:
+                prefix = display_data['prefix']
+            else:
+                prefix = ""
+            if display_data['add_sufix']:
+                sufix = display_data['sufix']
+            else:
+                sufix = ""
+            self.svg.add(
+                self.svg.text(
+                    f"{prefix}{rl}{sufix}",
+                    insert=tuple(text_position), 
+                    class_="SECTIONLEVEL", 
+                    **text_style
+                )
+            )
             if tag:
                 self.svg.add(self.svg.text(tag, insert=(text_position[0], text_position[1] - 5), **text_style))
 
@@ -765,6 +786,7 @@ class SvgWriter:
             path = self.svg.add(self.svg.path(d=d, class_=" ".join(classes)))
 
     def draw_plan_level_annotation(self, obj):
+        display_data = DecoratorData.get_level_display_data(obj)
         x_offset = self.raw_width / 2
         y_offset = self.raw_height / 2
         matrix_world = obj.matrix_world
@@ -795,13 +817,25 @@ class SvgWriter:
                 rl /= unit_scale
                 rl = ifcopenshell.util.geolocation.auto_z2e(tool.Ifc.get(), rl)
                 rl *= unit_scale
-                rl = "{:.3f}m".format(rl)
+                rl = helper.format_distance(rl, precision=self.precision, decimal_places=self.decimal_places)
+                # rl = "{:.3f}m".format(rl)
+                if float(rl) > 0:
+                    rl = "+"+rl
 
             box_alignment = "bottom-left" if projected_points[0].x <= projected_points[-1].x else "bottom-right"
             text_style = SvgWriter.get_box_alignment_parameters(box_alignment)
+            
+            if display_data['add_prefix']:
+                prefix = display_data['prefix']
+            else:
+                prefix = ""
+            if display_data['add_sufix']:
+                sufix = display_data['sufix']
+            else:
+                sufix = ""
             self.svg.add(
                 self.svg.text(
-                    "RL +{}".format(rl),
+                    "{}{}{}".format(prefix, rl, sufix),
                     insert=tuple(text_position),
                     class_="PLANLEVEL",
                     **text_style,

@@ -213,6 +213,40 @@ class DecoratorData:
 
         cls.data[obj.name] = display_data
         return display_data
+    
+    # used by Ifc Annotations with ObjectType = "PLAN_LEVEL"
+    @classmethod
+    def get_level_display_data(cls, obj):
+        result = cls.data.get(obj.name, None)
+        if result is not None:
+            return result
+
+        element = tool.Ifc.get_entity(obj)
+        if not element:
+            return
+
+        # default values
+        pset_data = {
+            "ShowPrefix": True,
+            "Prefix": "",
+            "ShowSufix": True,
+            "Sufix": "",
+            "ShowCustomSymbol": True,
+            "CustomSymbol": "",
+        }
+        obj_pset_data = ifcopenshell.util.element.get_pset(element, "BBIM_Level") or {}
+        pset_data.update(obj_pset_data)
+
+        # create more usable display data
+        display_data = {
+            "add_prefix": pset_data["ShowPrefix"],
+            "prefix": pset_data["Prefix"],
+            "add_sufix": pset_data["ShowSufix"],
+            "sufix": pset_data["Sufix"],
+        }
+
+        cls.data[obj.name] = display_data
+        return display_data
 
     # used by Ifc Annotations with ObjectType = "TEXT" / "TEXT_LEADER"
     @classmethod
