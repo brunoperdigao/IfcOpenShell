@@ -234,7 +234,6 @@ class SvgWriter:
                 rl /= unit_scale
                 rl = ifcopenshell.util.geolocation.auto_z2e(tool.Ifc.get(), rl)
                 rl *= unit_scale
-                # rl = "{:.3f}m".format(rl)
                 rl = helper.format_distance(rl, precision=self.precision, decimal_places=self.decimal_places)
                 if float(rl) > 0:
                     rl = "+"+rl
@@ -818,7 +817,6 @@ class SvgWriter:
                 rl = ifcopenshell.util.geolocation.auto_z2e(tool.Ifc.get(), rl)
                 rl *= unit_scale
                 rl = helper.format_distance(rl, precision=self.precision, decimal_places=self.decimal_places)
-                # rl = "{:.3f}m".format(rl)
                 if float(rl) > 0:
                     rl = "+"+rl
 
@@ -835,7 +833,7 @@ class SvgWriter:
                 sufix = ""
             self.svg.add(
                 self.svg.text(
-                    "{}{}{}".format(prefix, rl, sufix),
+                    f"{prefix}{rl}{sufix}",
                     insert=tuple(text_position),
                     class_="PLANLEVEL",
                     **text_style,
