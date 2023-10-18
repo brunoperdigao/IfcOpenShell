@@ -229,3 +229,48 @@ class BIM_OT_add_part_to_object(bpy.types.Operator, Operator):
             part_class=self.part_class,
             part_name=self.part_name,
         )
+
+class BIM_OT_select_all_objects_in_aggregate(bpy.types.Operator):
+    """Select All Objects in Aggregate"""
+
+    bl_idname = "bim.select_all_objects_in_aggregate"
+    bl_label = "Select All Objects in Aggregate"
+    bl_options = {"REGISTER", "UNDO"}
+    obj: bpy.props.StringProperty()
+
+    def execute(self, context):
+        self.file = IfcStore.get_file()
+        obj = bpy.data.objects.get(self.obj) or context.active_object
+        element = tool.Ifc.get_entity(obj)
+        
+        if element.is_a("IfcElementAssembly"):
+            pass
+        elif element.Decomposes:
+            if element.Decomposes[0].RelatingObject.is_a("IfcElementAssembly"):
+                element = element.Decomposes[0].RelatingObject
+                obj = tool.Ifc.get_object(element)
+        else:
+            self.report({"INFO"}, "Object is not part of a IfcElementAssembly.")
+            return {"FINISHED"}
+
+        self.select_all_objects(element)
+        
+        return {"FINISHED"}
+
+    def select_all_objects(self, element): 
+        obj = tool.Ifc.get_object(element)
+        obj.select_set(True)
+        parts = ifcopenshell.util.element.get_parts(element)
+        if parts:
+            for part in parts:
+                if part.is_a("IfcElementAssembly"):
+                    self.select_all_objects(part)
+                obj = tool.Ifc.get_object(part)
+                obj.select_set(True)
+
+
+        
+
+
+
+        

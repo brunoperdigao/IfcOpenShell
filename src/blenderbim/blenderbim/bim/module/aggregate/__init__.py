@@ -28,14 +28,27 @@ classes = (
     operator.BIM_OT_select_parts,
     operator.BIM_OT_select_aggregate,
     operator.BIM_OT_add_part_to_object,
+    operator.BIM_OT_select_all_objects_in_aggregate,
     prop.BIMObjectAggregateProperties,
     ui.BIM_PT_aggregate,
 )
 
+addon_keymaps = []
 
 def register():
     bpy.types.Object.BIMObjectAggregateProperties = bpy.props.PointerProperty(type=prop.BIMObjectAggregateProperties)
+    wm = bpy.context.window_manager
+    if wm.keyconfigs.addon:
+        km = wm.keyconfigs.addon.keymaps.new(name="Object Mode", space_type="EMPTY")
+        kmi = km.keymap_items.new("bim.select_all_objects_in_aggregate", "LEFTMOUSE", "DOUBLE_CLICK")
+        addon_keymaps.append((km, kmi))
 
 
 def unregister():
     del bpy.types.Object.BIMObjectAggregateProperties
+    wm = bpy.context.window_manager
+    kc = wm.keyconfigs.addon
+    if kc:
+        for km, kmi in addon_keymaps:
+            km.keymap_items.remove(kmi)
+    addon_keymaps.clear()
