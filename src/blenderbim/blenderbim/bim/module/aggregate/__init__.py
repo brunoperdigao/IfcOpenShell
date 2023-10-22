@@ -29,6 +29,7 @@ classes = (
     operator.BIM_OT_select_aggregate,
     operator.BIM_OT_add_part_to_object,
     operator.BIM_OT_select_all_objects_in_aggregate,
+    operator.BIM_OT_enable_aggregate_decorator,
     prop.BIMObjectAggregateProperties,
     ui.BIM_PT_aggregate,
 )
@@ -37,6 +38,7 @@ addon_keymaps = []
 
 def register():
     bpy.types.Object.BIMObjectAggregateProperties = bpy.props.PointerProperty(type=prop.BIMObjectAggregateProperties)
+    bpy.types.Scene.aggregate_decorator = bpy.props.BoolProperty(name = "Aggregate Decorator", default=True)
     wm = bpy.context.window_manager
     if wm.keyconfigs.addon:
         km = wm.keyconfigs.addon.keymaps.new(name="Object Mode", space_type="EMPTY")
@@ -46,6 +48,7 @@ def register():
 
 def unregister():
     del bpy.types.Object.BIMObjectAggregateProperties
+    del bpy.types.Scene.aggregate_decorator
     wm = bpy.context.window_manager
     kc = wm.keyconfigs.addon
     if kc:

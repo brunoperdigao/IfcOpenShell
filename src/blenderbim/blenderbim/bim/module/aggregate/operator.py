@@ -24,6 +24,7 @@ import blenderbim.core.aggregate as core
 import blenderbim.core.spatial
 import blenderbim.bim.handler
 from blenderbim.bim.ifc import IfcStore
+from blenderbim.bim.module.aggregate.decorator import AggregateDecorator
 
 
 class Operator:
@@ -239,9 +240,9 @@ class BIM_OT_select_all_objects_in_aggregate(bpy.types.Operator):
     obj: bpy.props.StringProperty()
 
     def execute(self, context):
-        self.file = IfcStore.get_file()
-        obj = bpy.data.objects.get(self.obj) or context.active_object
-        element = tool.Ifc.get_entity(obj)
+        element = tool.Ifc.get_entity(context.active_object)
+        if not element:
+            return {"FINISHED"}
         
         if element.is_a("IfcElementAssembly"):
             pass
@@ -267,10 +268,17 @@ class BIM_OT_select_all_objects_in_aggregate(bpy.types.Operator):
                     self.select_all_objects(part)
                 obj = tool.Ifc.get_object(part)
                 obj.select_set(True)
+  
+class BIM_OT_enable_aggregate_decorator(bpy.types.Operator, tool.Ifc.Operator):
+    """Creates an Overlay Over All Objects in Aggregate"""
 
+    bl_idname = "bim.enable_aggregate_decorator"
+    bl_label = "Creates an Overlay Over All Objects in Aggregate"
+    bl_options = {"REGISTER", "UNDO"}
 
-        
-
-
-
-        
+    def _execute(self, context):
+        if not hasattr(bpy.context.scene, "aggregate_decorator") or not bpy.context.scene.aggregate_decorator:
+            AggregateDecorator.uninstall()
+            return {"Finished"}
+        print("Foi")
+        AggregateDecorator.install(context)
