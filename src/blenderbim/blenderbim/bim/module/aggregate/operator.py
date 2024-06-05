@@ -280,5 +280,4 @@ class BIM_OT_enable_aggregate_decorator(bpy.types.Operator, tool.Ifc.Operator):
         if not hasattr(bpy.context.scene, "aggregate_decorator") or not bpy.context.scene.aggregate_decorator:
             AggregateDecorator.uninstall()
             return {"Finished"}
-        print("Foi")
         AggregateDecorator.install(context)

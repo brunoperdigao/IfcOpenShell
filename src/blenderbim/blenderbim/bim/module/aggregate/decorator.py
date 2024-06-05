@@ -50,12 +50,10 @@ class AggregateDecorator:
         batch.draw(shader)
 
     def __call__(self, context):
-        print("TEST3")
         self.addon_prefs = context.preferences.addons["blenderbim"].preferences
         theme = context.preferences.themes.items()[0][1]
         # selected_elements_color = self.addon_prefs.decorator_color_selected
         selected_element_color = (*theme.view_3d.object_active, 1) #unwrap color values and adds alpha=1
-        print(selected_element_color)
         unselected_elements_color = self.addon_prefs.decorator_color_unselected
         special_elements_color = self.addon_prefs.decorator_color_special
 
@@ -124,7 +122,6 @@ class AggregateDecorator:
         
         
         for obj in selected_objects:
-            print("OBJ1", obj)
             if obj.type == 'MESH':
                 bm = bmesh.new()
                 bm.from_mesh(obj.data)
