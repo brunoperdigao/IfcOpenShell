@@ -70,6 +70,9 @@ class BIM_PT_aggregate(Panel):
             return
         else:
             row = layout.row(align=True)
+            row.label(text="Highlight Selected Aggregates:")
+            row.prop(context.scene.BIMAggregateVisualization, "aggregate_decorator", icon="HIDE_OFF", text="")
+            row = layout.row(align=True)
             if AggregateData.data["has_relating_object"]:
                 row.label(text=AggregateData.data["relating_object_label"], icon="TRIA_UP")
                 op = row.operator("bim.select_aggregate", icon="OBJECT_DATA", text="")

@@ -19,6 +19,7 @@
 import bpy
 from bonsai.bim.prop import StrProperty, Attribute
 from bonsai.bim.module.spatial.data import SpatialData
+from bonsai.bim.module.aggregate.decorator import AggregateDecorator
 from bpy.types import PropertyGroup
 from bpy.props import (
     PointerProperty,
@@ -54,7 +55,19 @@ def update_related_object(self, context):
             self.related_object = None
 
 
+def update_aggregate_decorator(self, context):
+    if self.aggregate_decorator:
+        AggregateDecorator.install(bpy.context)
+    else:
+        AggregateDecorator.uninstall()
+
+
 class BIMObjectAggregateProperties(PropertyGroup):
     is_editing: BoolProperty(name="Is Editing")
     relating_object: PointerProperty(name="Relating Whole", type=bpy.types.Object, update=update_relating_object)
     related_object: PointerProperty(name="Related Part", type=bpy.types.Object, update=update_related_object)
+    should_show_aggregate_bbox: BoolProperty(name="Show Aggregate Bounding Box")
+
+        
+class BIMAggregateVisualization(PropertyGroup):
+    aggregate_decorator: BoolProperty(name="Aggregate Decorator", default=True, update=update_aggregate_decorator)
