@@ -695,6 +695,7 @@ class EditMaterialSetItem(bpy.types.Operator, tool.Ifc.Operator):
                 },
             )
         elif material.is_a("IfcMaterialLayerSet"):
+            print("ATT", attributes)
             ifcopenshell.api.run(
                 "material.edit_layer",
                 self.file,

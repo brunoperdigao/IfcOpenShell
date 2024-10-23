@@ -1241,6 +1241,7 @@ class DumbWallJoiner:
                     "geometry.assign_representation", tool.Ifc.get(), product=element, representation=new_axis
                 )
 
+        print(layers)
         new_body = ifcopenshell.api.run(
             "geometry.add_wall_representation",
             tool.Ifc.get(),

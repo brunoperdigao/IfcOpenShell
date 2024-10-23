@@ -17,6 +17,7 @@
 # along with Bonsai.  If not, see <http://www.gnu.org/licenses/>.
 
 import bpy
+import copy
 import json
 import bmesh
 import ifcopenshell
@@ -30,6 +31,8 @@ import bonsai.core.type
 import bonsai.core.geometry
 import bonsai.core.root
 import bonsai.tool as tool
+from bonsai.bim.ifc import IfcStore
+from math import cos
 from mathutils import Vector, Matrix
 from bonsai.bim.module.geometry.helper import Helper
 from bonsai.bim.module.model.decorator import ProfileDecorator, PolylineDecorator, ProductDecorator
@@ -294,6 +297,102 @@ class DumbSlabPlaner:
 
         obj.location[2] -= delta_thickness
 
+class DumbSlabRecalculator:
+    def __init__(self):
+        self.unit_scale = ifcopenshell.util.unit.calculate_unit_scale(tool.Ifc.get())
+        self.body_context = ifcopenshell.util.representation.get_context(tool.Ifc.get(), "Model", "Body", "MODEL_VIEW")
+
+    def recreate_slab(self, obj):    
+        element = tool.Ifc.get_entity(obj)
+        extrusion_data = self.get_extrusion_data(tool.Ifc.get().by_id(obj.data.BIMMeshProperties.ifc_definition_id))
+        x_angle = extrusion_data["x_angle"]
+        self.clippings = []
+        layers = tool.Model.get_material_layer_parameters(element)
+        depth = layers["thickness"]
+        print(extrusion_data)
+        print("\n\n", layers)
+
+        previous_matrix = obj.matrix_world.copy()
+        previous_origin = previous_matrix.translation.xy
+        # obj.matrix_world.translation.xy = self.body[0]
+        bpy.context.view_layer.update()
+
+        new_matrix = copy.deepcopy(obj.matrix_world)
+        new_matrix.invert()
+
+        
+
+        for clipping in self.clippings:
+            if clipping["operand_type"] == "IfcHalfSpaceSolid":
+                clipping["matrix"] = new_matrix @ clipping["matrix"]
+
+        old_body = ifcopenshell.util.representation.get_representation(element, "Model", "Body", "MODEL_VIEW")
+        if not old_body:
+            polyline = []
+        else:
+            mesh = tool.Geometry.get_representation_data(old_body)
+            print(v for v in mesh.vertices)
+            polyline = [v.co for v in mesh.vertices if v.co[2] == 0]
+            polyline.append(polyline[0])
+
+
+
+        new_body = ifcopenshell.api.run(
+            "geometry.add_slab_representation",
+            tool.Ifc.get(),
+            context=self.body_context,
+            depth=depth,
+            x_angle=x_angle,
+            clippings=self.clippings,
+            polyline=polyline
+        )
+
+        old_body = ifcopenshell.util.representation.get_representation(element, "Model", "Body", "MODEL_VIEW")
+        if old_body:
+            for inverse in tool.Ifc.get().get_inverse(old_body):
+                ifcopenshell.util.element.replace_attribute(inverse, old_body, new_body)
+            obj.data.BIMMeshProperties.ifc_definition_id = int(new_body.id())
+            obj.data.name = f"{self.body_context.id()}/{new_body.id()}"
+            bonsai.core.geometry.remove_representation(tool.Ifc, tool.Geometry, obj=obj, representation=old_body)
+        else:
+            ifcopenshell.api.run(
+                "geometry.assign_representation", tool.Ifc.get(), product=element, representation=new_body
+            )
+            
+        bonsai.core.geometry.switch_representation(
+            tool.Ifc,
+            tool.Geometry,
+            obj=obj,
+            representation=new_body,
+            should_reload=True,
+            is_global=True,
+            should_sync_changes_first=False,
+        )
+        tool.Geometry.record_object_materials(obj)
+
+    def get_extrusion_data(self, representation):
+        results = {"item": None, "height": 3.0, "x_angle": 0, "is_sloped": False, "direction": Vector((0, 0, 1))}
+        item = representation.Items[0]
+        while True:
+            if item.is_a("IfcExtrudedAreaSolid"):
+                results["item"] = item
+                x, y, z = item.ExtrudedDirection.DirectionRatios
+                if not tool.Cad.is_x(x, 0) or not tool.Cad.is_x(y, 0) or not tool.Cad.is_x(z, 1):
+                    results["direction"] = Vector(item.ExtrudedDirection.DirectionRatios)
+                    results["x_angle"] = Vector((0, 1)).angle_signed(Vector((y, z)))
+                    results["is_sloped"] = True
+                results["height"] = (item.Depth * self.unit_scale) / (1 / cos(results["x_angle"]))
+                break
+            elif item.is_a("IfcBooleanClippingResult"):  # should be before IfcBooleanResult check
+                item = item.FirstOperand
+            elif item.is_a("IfcBooleanResult"):
+                if item.FirstOperand.is_a("IfcExtrudedAreaSolid") or item.FirstOperand.is_a("IfcBooleanResult"):
+                    item = item.FirstOperand
+                else:
+                    item = item.SecondOperand
+            else:
+                break
+        return results
 
 class EnableEditingSketchExtrusionProfile(bpy.types.Operator, tool.Ifc.Operator):
     bl_idname = "bim.enable_editing_sketch_extrusion_profile"
@@ -745,7 +844,26 @@ class DrawPolylineSlab(bpy.types.Operator, PolylineOperator):
         if not self.relating_type:
             return {"FINISHED"}
 
-        DumbSlabGenerator(self.relating_type).generate(True)
+        model_props = context.scene.BIMModelProperties
+        direction_sense = model_props.direction_sense
+        offset = model_props.offset
+
+        slab = DumbSlabGenerator(self.relating_type).generate(True)
+        model = IfcStore.get_file()
+        element = tool.Ifc.get_entity(slab)
+        material = ifcopenshell.util.element.get_material(element)
+        material_set_usage = model.by_id(material.id())
+        # if material.is_a("IfcMaterialLayerSetUsage"):
+        attributes = {"OffsetFromReferenceLine": offset, "DirectionSense": direction_sense}
+        ifcopenshell.api.run(
+            "material.edit_layer_usage",
+            model,
+            **{"usage": material_set_usage, "attributes": attributes},
+        )
+
+        DumbSlabRecalculator().recreate_slab(slab)
+
+
 
     def modal(self, context, event):
         if not self.relating_type:
