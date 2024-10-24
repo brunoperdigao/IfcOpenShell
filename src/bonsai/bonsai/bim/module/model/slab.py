@@ -31,7 +31,6 @@ import bonsai.core.type
 import bonsai.core.geometry
 import bonsai.core.root
 import bonsai.tool as tool
-from bonsai.bim.ifc import IfcStore
 from math import cos
 from mathutils import Vector, Matrix
 from bonsai.bim.module.geometry.helper import Helper
@@ -113,7 +112,7 @@ class DumbSlabGenerator:
         matrix_world = Matrix()
         matrix_world.translation = self.location
         if self.container_obj:
-            matrix_world.translation.z = self.container_obj.location.z - self.depth
+            matrix_world.translation.z = self.container_obj.location.z
         else:
             matrix_world.translation.z -= self.depth
         obj.matrix_world = Matrix.Rotation(self.x_angle, 4, "X") @ matrix_world
@@ -308,45 +307,51 @@ class DumbSlabRecalculator:
         x_angle = extrusion_data["x_angle"]
         self.clippings = []
         layers = tool.Model.get_material_layer_parameters(element)
+        print("Slab", layers["offset"])
         depth = layers["thickness"]
-        print(extrusion_data)
-        print("\n\n", layers)
-
-        previous_matrix = obj.matrix_world.copy()
-        previous_origin = previous_matrix.translation.xy
-        # obj.matrix_world.translation.xy = self.body[0]
-        bpy.context.view_layer.update()
+        offset = layers["offset"]
+        # print(offset)
+        # print(obj.BIMObjectMaterialProperties.reference_type)
+        # if obj.BIMObjectMaterialProperties.reference_type == 'TOP':
+        #     offset -= depth
+        print("off", offset)
+        direction_sense = layers["direction_sense"]
 
         new_matrix = copy.deepcopy(obj.matrix_world)
         new_matrix.invert()
 
-        
-
+        # TODO Check if this is working
         for clipping in self.clippings:
             if clipping["operand_type"] == "IfcHalfSpaceSolid":
                 clipping["matrix"] = new_matrix @ clipping["matrix"]
 
+        print("OBJ", obj)
+        print("ELEMENT", element)
         old_body = ifcopenshell.util.representation.get_representation(element, "Model", "Body", "MODEL_VIEW")
+        print("OLD", old_body)
         if not old_body:
             polyline = []
         else:
             mesh = tool.Geometry.get_representation_data(old_body)
-            print(v for v in mesh.vertices)
-            polyline = [v.co for v in mesh.vertices if v.co[2] == 0]
+            polyline = [v.co for v in mesh.vertices]
+            max_z = max(v[2] for v in polyline)
+            polyline = [v for v in polyline if v[2] == max_z]
             polyline.append(polyline[0])
-
-
 
         new_body = ifcopenshell.api.run(
             "geometry.add_slab_representation",
             tool.Ifc.get(),
             context=self.body_context,
             depth=depth,
+            offset=offset,
             x_angle=x_angle,
+            direction_sense=direction_sense,
             clippings=self.clippings,
             polyline=polyline
         )
 
+        print("NEW", new_body)
+        print("_______-----------____________")
         old_body = ifcopenshell.util.representation.get_representation(element, "Model", "Body", "MODEL_VIEW")
         if old_body:
             for inverse in tool.Ifc.get().get_inverse(old_body):
@@ -823,6 +828,21 @@ class SetArcIndex(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class RecalculateSlab(bpy.types.Operator, tool.Ifc.Operator):
+    bl_idname = "bim.recalculate_slab"
+    bl_label = "Recalculate Slab"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        return context.selected_objects
+
+    def _execute(self, context):
+        for obj in context.selected_objects:
+            DumbSlabRecalculator().recreate_slab(obj)
+        return {"FINISHED"}
+
+    
 class DrawPolylineSlab(bpy.types.Operator, PolylineOperator):
     bl_idname = "bim.draw_polyline_slab"
     bl_label = "Draw Polyline Slab"
@@ -849,15 +869,33 @@ class DrawPolylineSlab(bpy.types.Operator, PolylineOperator):
         offset = model_props.offset
 
         slab = DumbSlabGenerator(self.relating_type).generate(True)
-        model = IfcStore.get_file()
+        file = tool.Ifc.get()
         element = tool.Ifc.get_entity(slab)
+        layers = tool.Model.get_material_layer_parameters(element)
+        tool.Blender.set_active_object(slab)
+        print("LAYERS", layers)
+        if slab.BIMObjectMaterialProperties.reference_type == 'TOP':
+            offset -= layers["thickness"]
+
+        unit_system = tool.Drawing.get_unit_system()
+        factor = 1
+        if unit_system == "IMPERIAL":
+            factor = 3.048
+        if unit_system == "METRIC":
+            unit_length = context.scene.unit_settings.length_unit
+            if unit_length == "MILLIMETERS":
+                factor = 1000
+
+        offset = offset * factor
+
+            
         material = ifcopenshell.util.element.get_material(element)
-        material_set_usage = model.by_id(material.id())
+        material_set_usage = file.by_id(material.id())
         # if material.is_a("IfcMaterialLayerSetUsage"):
         attributes = {"OffsetFromReferenceLine": offset, "DirectionSense": direction_sense}
         ifcopenshell.api.run(
             "material.edit_layer_usage",
-            model,
+            file,
             **{"usage": material_set_usage, "attributes": attributes},
         )
 

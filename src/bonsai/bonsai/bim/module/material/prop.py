@@ -90,6 +90,11 @@ def get_object_material_type(self, context):
         ObjectMaterialData.load()
     return ObjectMaterialData.data["material_type"]
 
+def get_reference_type(self, context):
+    if not ObjectMaterialData.is_loaded:
+        ObjectMaterialData.load()
+    return ObjectMaterialData.data["reference_type"]
+    
 
 def get_material_types(self, context):
     if not MaterialsData.is_loaded:
@@ -172,3 +177,5 @@ class BIMObjectMaterialProperties(PropertyGroup):
     parameterized_profile_classes: EnumProperty(
         items=get_parameterized_profile_classes, name="Parameterized Profile Classes"
     )
+    reference_type: EnumProperty(items=get_reference_type, name="Reference Type")
+

@@ -170,8 +170,22 @@ class ObjectMaterialData:
         cls.data["active_material_constituents"] = cls.active_material_constituents()
         # after material_name and type_material
         cls.data["is_type_material_overridden"] = cls.is_type_material_overridden()
+        cls.data["reference_type"] = cls.reference_type()
 
         cls.is_loaded = True
+
+    @classmethod
+    def reference_type(cls):
+        element = tool.Ifc.get_entity(bpy.context.active_object)
+        usage = tool.Model.get_usage_type(element)
+        if usage == "LAYER2":
+            return [
+                ("EXTERIOR", "EXTERIOR", "Exterior"),
+                ("CENTER", "CENTER", "Center"),
+                ("INTERIOR", "INTERIOR", "Interior"),
+            ]
+        if usage == "LAYER3":
+            return [("TOP", "TOP", "Top"), ("BOTTOM", "BOTTOM", "Bottom")]
 
     @classmethod
     def material_class(cls):

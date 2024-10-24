@@ -216,6 +216,10 @@ class BIM_PT_object_material(Panel):
         bonsai.bim.helper.draw_attributes(self.props.material_set_attributes, self.layout)
         bonsai.bim.helper.draw_attributes(self.props.material_set_usage_attributes, self.layout)
 
+        row = self.layout.row(align=True)
+        row.label(text="Reference Type")
+        row.prop(self.props, "reference_type", text="", icon="NONE", emboss=False)
+
         if ObjectMaterialData.data["set_item_name"] == "profile" and not self.mprops.profiles:
             row = self.layout.row(align=True)
             row.label(text="No Profiles Available")

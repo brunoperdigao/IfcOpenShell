@@ -304,6 +304,7 @@ class DrawPolylineWall(bpy.types.Operator, PolylineOperator):
         model_props = context.scene.BIMModelProperties
         direction_sense = model_props.direction_sense
         offset = model_props.offset
+        print("wall", offset)
 
         walls, is_polyline_closed = DumbWallGenerator(self.relating_type).generate(True)
         for wall in walls:
@@ -1241,7 +1242,7 @@ class DumbWallJoiner:
                     "geometry.assign_representation", tool.Ifc.get(), product=element, representation=new_axis
                 )
 
-        print(layers)
+        print("Wall", layers["offset"])
         new_body = ifcopenshell.api.run(
             "geometry.add_wall_representation",
             tool.Ifc.get(),

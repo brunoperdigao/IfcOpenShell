@@ -29,11 +29,13 @@ def add_slab_representation(
     context: ifcopenshell.entity_instance,
     # in meters
     depth: float = 0.2,
+    offset: float = 0.0,
     # in radians
     x_angle: float = 0.0,
     # A list of planes that define clipping half space solids
     # Planes are defined either by Clipping objects
     # or by dictionaries of arguments for `Clipping.parse`
+    direction_sense: str = 'POSITIVE',
     clippings: Optional[list[Union[Clipping, dict[str, Any]]]] = None,
     polyline: Optional[list[Vector]] = None,
 ) -> ifcopenshell.entity_instance:
@@ -42,7 +44,9 @@ def add_slab_representation(
     usecase.settings = {
         "context": context,
         "depth": depth,
+        "offset": offset,
         "x_angle": x_angle,
+        "direction_sense": direction_sense,
         "clippings": clippings if clippings is not None else [],
         "polyline": polyline,
     }
@@ -74,21 +78,36 @@ class Usecase:
             )
         else:
             extrusion_direction = self.file.createIfcDirection((0.0, 0.0, 1.0))
+        print("EXT1", extrusion_direction)
 
-        position = None
+        # position = None
         # default position for IFC2X3 where .Position is not optional
         if self.file.schema == "IFC2X3":
             position = self.file.createIfcAxis2Placement3D(
-                self.file.createIfcCartesianPoint((0.0, 0.0, 0.0)),
+                self.file.createIfcCartesianPoint((0.0, 0.0, self.convert_si_to_unit(self.settings["offset"]))),
                 self.file.createIfcDirection((0.0, 0.0, 1.0)),
                 self.file.createIfcDirection((1.0, 0.0, 0.0)),
             )
 
+        # if self.settings["offset"] != 0:
+        print(self.settings["offset"])
+        position = self.file.createIfcAxis2Placement3D(
+            self.file.createIfcCartesianPoint((0.0, 0.0, self.convert_si_to_unit(self.settings["offset"]))),
+            self.file.createIfcDirection((0.0, 0.0, 1.0)),
+            self.file.createIfcDirection((1.0, 0.0, 0.0)),
+        )
+
+        if self.settings["direction_sense"] == 'NEGATIVE':
+            print("ENTROU")
+            extrusion_direction = self.file.createIfcDirection((0.0, 0.0, -1.0))
+            self.settings["depth"] *= -1
+
+        print("EXT2", extrusion_direction)
         extrusion = self.file.createIfcExtrudedAreaSolid(
             self.file.createIfcArbitraryClosedProfileDef("AREA", None, curve),
             position,
             extrusion_direction,
-            self.convert_si_to_unit(self.settings["depth"]) * 1 / cos(self.settings["x_angle"]),
+            self.convert_si_to_unit(self.settings["depth"]) * (1 / cos(self.settings["x_angle"])),
         )
         if self.settings["clippings"]:
             return self.apply_clippings(extrusion)

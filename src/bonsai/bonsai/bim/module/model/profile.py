@@ -432,6 +432,7 @@ class DumbProfileJoiner:
                     obj, other, connection, rel.RelatingConnectionType, is_relating=False, description=rel.Description
                 )
 
+        print("profile loc", obj.matrix_world.translation)
         new_matrix = copy.deepcopy(obj.matrix_world)
         new_matrix.translation = self.body[0].copy()
         new_matrix.invert()

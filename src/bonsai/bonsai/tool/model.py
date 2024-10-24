@@ -506,6 +506,8 @@ class Model(bonsai.core.tool.Model):
         thickness = 0.0
         direction_sense = "POSITIVE"
         material = ifcopenshell.util.element.get_material(element)
+        print(material)
+        print(dir(material))
         if material:
             if material.is_a("IfcMaterialLayerSetUsage"):
                 layer_set_direction = material.LayerSetDirection
