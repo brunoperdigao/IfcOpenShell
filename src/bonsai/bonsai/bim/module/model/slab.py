@@ -236,7 +236,7 @@ class DumbSlabPlaner:
         if not obj:
             return
 
-        delta_thickness = (thickness * self.unit_scale) - obj.dimensions.z
+        delta_thickness = (thickness * self.unit_scale)
         if round(delta_thickness, 2) == 0:
             return
 
@@ -294,27 +294,24 @@ class DumbSlabPlaner:
             should_sync_changes_first=False,
         )
 
-        obj.location[2] -= delta_thickness
 
 class DumbSlabRecalculator:
-    def __init__(self):
+    def recreate_slab(self, usecase_path, ifc_file, settings):
+        print("ATIVOU")
+        inverse = list(ifc_file.get_inverse(settings["usage"]))[0]
+        element = None
+        for e in inverse.RelatedObjects:
+            print(e)
+            element = e
         self.unit_scale = ifcopenshell.util.unit.calculate_unit_scale(tool.Ifc.get())
         self.body_context = ifcopenshell.util.representation.get_context(tool.Ifc.get(), "Model", "Body", "MODEL_VIEW")
-
-    def recreate_slab(self, obj):    
-        element = tool.Ifc.get_entity(obj)
+        obj = tool.Ifc.get_object(element)
         extrusion_data = self.get_extrusion_data(tool.Ifc.get().by_id(obj.data.BIMMeshProperties.ifc_definition_id))
         x_angle = extrusion_data["x_angle"]
         self.clippings = []
         layers = tool.Model.get_material_layer_parameters(element)
-        print("Slab", layers["offset"])
         depth = layers["thickness"]
         offset = layers["offset"]
-        # print(offset)
-        # print(obj.BIMObjectMaterialProperties.reference_type)
-        # if obj.BIMObjectMaterialProperties.reference_type == 'TOP':
-        #     offset -= depth
-        print("off", offset)
         direction_sense = layers["direction_sense"]
 
         new_matrix = copy.deepcopy(obj.matrix_world)
@@ -325,10 +322,7 @@ class DumbSlabRecalculator:
             if clipping["operand_type"] == "IfcHalfSpaceSolid":
                 clipping["matrix"] = new_matrix @ clipping["matrix"]
 
-        print("OBJ", obj)
-        print("ELEMENT", element)
         old_body = ifcopenshell.util.representation.get_representation(element, "Model", "Body", "MODEL_VIEW")
-        print("OLD", old_body)
         if not old_body:
             polyline = []
         else:
@@ -899,7 +893,7 @@ class DrawPolylineSlab(bpy.types.Operator, PolylineOperator):
             **{"usage": material_set_usage, "attributes": attributes},
         )
 
-        DumbSlabRecalculator().recreate_slab(slab)
+        # DumbSlabRecalculator().recreate_slab(slab)
 
 
 

@@ -291,3 +291,5 @@ def wrap_usecases(path, name):
         if callable(usecase):
             usecase_path = f"{module_name}.{usecase_name}"
             setattr(module, usecase_name, wrap_usecase(usecase_path, usecase))
+
+print("API", post_listeners)

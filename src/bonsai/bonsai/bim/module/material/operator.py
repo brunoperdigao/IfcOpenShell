@@ -555,6 +555,7 @@ class EditAssignedMaterial(bpy.types.Operator, tool.Ifc.Operator):
         )
 
         if self.material_set_usage:
+            print("EDIT")
             material_set_usage = self.file.by_id(self.material_set_usage)
             attributes = bonsai.bim.helper.export_attributes(props.material_set_usage_attributes)
             if material_set_usage.is_a("IfcMaterialLayerSetUsage"):
@@ -695,7 +696,6 @@ class EditMaterialSetItem(bpy.types.Operator, tool.Ifc.Operator):
                 },
             )
         elif material.is_a("IfcMaterialLayerSet"):
-            print("ATT", attributes)
             ifcopenshell.api.run(
                 "material.edit_layer",
                 self.file,
