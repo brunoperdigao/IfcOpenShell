@@ -844,6 +844,25 @@ class Spatial(bonsai.core.tool.Spatial):
         return polys
 
     @classmethod
+    def get_polygons_from_wall_axis(cls, walls: list[bpy.types.Object]) -> list[Polygon]:
+        points1 = []
+        points2 = []
+        for w1, w2 in zip(walls, walls[1:] + [walls[0]]):
+            layers1 = tool.Model.get_material_layer_parameters(tool.Ifc.get_entity(w1))
+            layers2 = tool.Model.get_material_layer_parameters(tool.Ifc.get_entity(w2))
+            axis1 = tool.Model.get_wall_axis(w1, layers1)
+            axis2 = tool.Model.get_wall_axis(w2, layers2)
+            intersection1 = tool.Cad.intersect_edges(axis1["reference"], axis2["reference"])
+            intersection2 = tool.Cad.intersect_edges(axis1["side"], axis2["side"])
+            points1.append(intersection1[0])
+            points2.append(intersection2[0])
+        
+        poly1 = Polygon(points1)
+        poly2 = Polygon(points2)
+            
+        return poly1 if poly1.area > poly2.area else poly2
+
+    @classmethod
     def get_obj_base_points(cls, obj: bpy.types.Object) -> dict[str, tuple[float, float]]:
         si_conversion = ifcopenshell.util.unit.calculate_unit_scale(tool.Ifc.get())
         bbox_ws = [obj.matrix_world @ Vector(v) / si_conversion for v in obj.bound_box]

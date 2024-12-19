@@ -32,7 +32,7 @@ import bonsai.core.root
 import bonsai.tool as tool
 from mathutils import Vector, Matrix
 from bonsai.bim.module.geometry.helper import Helper
-from bonsai.bim.module.model.decorator import ProfileDecorator, PolylineDecorator, ProductDecorator
+from bonsai.bim.module.model.decorator import ProfileDecorator, PolylineDecorator, ProductDecorator, WallAxisDecorator
 from bonsai.bim.module.model.polyline import PolylineOperator
 from bonsai.bim.module.model.wall import DumbWallRecalculator
 from typing import Optional
@@ -42,9 +42,9 @@ class DumbSlabGenerator:
     def __init__(self, relating_type: ifcopenshell.entity_instance):
         self.relating_type = relating_type
 
-    def generate(self, draw_from_polyline=False):
+    def generate(self, insertion_type="CURSOR"):
         self.file = tool.Ifc.get()
-        unit_scale = ifcopenshell.util.unit.calculate_unit_scale(tool.Ifc.get())
+        self.unit_scale = ifcopenshell.util.unit.calculate_unit_scale(tool.Ifc.get())
         thicknesses = []
         for rel in self.relating_type.HasAssociations:
             if rel.is_a("IfcRelAssociatesMaterial"):
@@ -69,16 +69,18 @@ class DumbSlabGenerator:
             self.container = container
             self.container_obj = tool.Ifc.get_object(container)
 
-        self.depth = sum(thicknesses) * unit_scale
+        self.depth = sum(thicknesses) * self.unit_scale
         self.width = 3
         self.length = 3
         self.rotation = 0
         self.location = Vector((0, 0, 0))
         self.x_angle = 0 if tool.Cad.is_x(props.x_angle, 0, tolerance=0.001) else props.x_angle
 
-        if draw_from_polyline:
+        if insertion_type == "POLYLINE":
             return self.derive_from_polyline()
-        else:
+        elif insertion_type == "WALLS":
+            return self.derive_from_walls()
+        elif insertion_type == "CURSOR":
             return self.derive_from_cursor()
 
     def derive_from_polyline(self):
@@ -98,6 +100,63 @@ class DumbSlabGenerator:
 
     def derive_from_cursor(self):
         self.location = bpy.context.scene.cursor.location
+        return self.create_slab()
+
+    def derive_from_walls(self):
+        # TODO Find another way to install the decorator
+        WallAxisDecorator.install(bpy.context)
+        # TODO Move this function to a tool file
+        def cicle_walls(walls, hour=True):
+            wall1 = tool.Ifc.get_entity(walls[0])
+            wall = wall1
+            if hour:
+                connection = "ConnectedTo"
+                relation = "RelatedElement"
+            else:
+                connection = "ConnectedFrom"
+                relation = "RelatingElement"
+    
+            ordered_walls = []
+            for i in range(len(walls)):
+                if not getattr(wall, connection):
+                    ordered_walls.append(wall)
+                    if not hour:
+                        return ordered_walls
+                    ordered_walls = cicle_walls(wall, False)
+                    break
+                next_wall = getattr(getattr(wall, connection)[0], relation)
+                if next_wall == wall1:
+                    ordered_walls.append(next_wall)
+                    break
+                else:
+                    ordered_walls.append(next_wall)
+                    wall = next_wall
+            
+            return [tool.Ifc.get_object(wall) for wall in ordered_walls]
+
+        walls = cicle_walls(bpy.context.selected_objects)
+        polyline_points = []
+        poly = tool.Spatial.get_polygons_from_wall_axis(walls) # TODO Move this function to model?
+        polyline_points = [tuple([v for v in c]) for c in poly.exterior.coords]
+
+        self.location = Vector((polyline_points[0][0], polyline_points[0][1], self.container_obj.location.z))
+        polyline = []
+        for point in polyline_points:
+            v = Vector((point[0], point[1], 0.0)) - self.location
+            polyline.append(v)
+            
+        # TODO 
+        # self.polyline = [tuple(Vector((p[0], p[1], 0.0)) - self.location) for p in polyline_points]
+        self.polyline = polyline
+        print(self.polyline)
+
+        if len(self.polyline) <= 2:
+            return
+
+        # Always assume a closed polyline
+        if self.polyline[0] != self.polyline[-1]:
+            self.polyline.append(self.polyline[0])
+        
         return self.create_slab()
 
     def create_slab(self):
@@ -725,6 +784,29 @@ class SetArcIndex(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class DrawSlabFromWall(bpy.types.Operator):
+    bl_idname = "bim.draw_slab_from_wall"
+    bl_label = "Draw Slab From Wall"
+    bl_options = {"REGISTER", "UNDO"}
+    @classmethod
+    def poll(cls, context):
+        return context.space_data.type == "VIEW_3D"
+
+    def __init__(self):
+        # super().__init__()
+        self.relating_type = None
+        props = bpy.context.scene.BIMModelProperties
+        relating_type_id = props.relating_type_id
+        if relating_type_id:
+            self.relating_type = tool.Ifc.get().by_id(int(relating_type_id))
+
+    def execute(self, context):
+        if not self.relating_type:
+            return {"FINISHED"}
+
+        DumbSlabGenerator(self.relating_type).generate("WALLS")
+        return {"FINISHED"}
+
 class DrawPolylineSlab(bpy.types.Operator, PolylineOperator):
     bl_idname = "bim.draw_polyline_slab"
     bl_label = "Draw Polyline Slab"
@@ -746,7 +828,7 @@ class DrawPolylineSlab(bpy.types.Operator, PolylineOperator):
         if not self.relating_type:
             return {"FINISHED"}
 
-        DumbSlabGenerator(self.relating_type).generate(True)
+        DumbSlabGenerator(self.relating_type).generate("POLYLINE")
 
     def modal(self, context, event):
         if not self.relating_type:
