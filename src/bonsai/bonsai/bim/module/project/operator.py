@@ -2706,10 +2706,6 @@ class MeasureFaceAreaTool(bpy.types.Operator, PolylineOperator):
         self.input_ui = tool.Polyline.create_input_ui(input_options=self.input_options)
         self.clicked_faces = []
         self.total_area = 0
-        if tool.Ifc.get():
-            self.unit_scale = ifcopenshell.util.unit.calculate_unit_scale(tool.Ifc.get())
-        else:
-            self.unit_scale = tool.Blender.get_unit_scale()
 
     def modal(self, context, event):
         def select_face(mouse_pos):

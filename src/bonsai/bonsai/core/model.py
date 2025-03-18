@@ -29,13 +29,13 @@ def unjoin_walls(ifc: tool.Ifc, blender: tool.Blender, geometry: tool.Geometry, 
 
 
 def extend_walls(
-    ifc: tool.Ifc, blender: tool.Blender, geometry: tool.Geometry, joiner, model: tool.Model, target
+    ifc: tool.Ifc, blender: tool.Blender, geometry: tool.Geometry, joiner, model: tool.Model, target, connection
 ) -> None:
     for obj in blender.get_selected_objects():
         if not (element := ifc.get_entity(obj)) or model.get_usage_type(element) != "LAYER2":
             continue
         geometry.clear_scale(obj)
-        joiner.extend(obj, target)
+        joiner.extend(obj, target, connection)
 
 
 def join_walls_LV(
