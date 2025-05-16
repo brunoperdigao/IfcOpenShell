@@ -113,6 +113,14 @@ def join_walls_TZ(ifc: tool.Ifc, blender: tool.Blender, geometry: tool.Geometry,
                 continue
             joiner.join_T(obj, active_obj)
 
+def edit_wall_axis(
+    ifc: tool.Ifc, blender: tool.Blender, geometry: tool.Geometry, joiner, model: tool.Model, p1, p2
+) -> None:
+    for obj in blender.get_selected_objects():
+        if not (element := ifc.get_entity(obj)) or model.get_usage_type(element) != "LAYER2":
+            continue
+        geometry.clear_scale(obj)
+        joiner.set_axis(tool.Ifc.get_entity(obj), p1, p2)
 
 class RequireTwoWallsError(Exception):
     pass

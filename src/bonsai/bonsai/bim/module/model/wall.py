@@ -145,7 +145,7 @@ class ExtendWallsToPolylinePoint(bpy.types.Operator, PolylineOperator, tool.Ifc.
         axis = tool.Model.get_wall_axis(obj, layers)
         start = Vector((axis["reference"][0][0], axis["reference"][0][1], obj.location.z))
         end = Vector((axis["reference"][1][0], axis["reference"][1][1], obj.location.z))
-        direcion = end - start
+        direction = end - start
         value = end if connection=="ATSTART" else start
         self.input_ui.set_value("X", value[0])
         self.input_ui.set_value("Y", value[1])
@@ -157,7 +157,7 @@ class ExtendWallsToPolylinePoint(bpy.types.Operator, PolylineOperator, tool.Ifc.
         snap_prop = context.scene.BIMPolylineProperties.snap_mouse_point[0]
         mouse_point = Vector((snap_prop.x, snap_prop.y, snap_prop.z))
 
-        angle = atan2(direcion.y, direcion.x)
+        angle = atan2(direction.y, direction.x)
 
         self.tool_state.lock_axis = True
         self.tool_state.snap_angle = degrees(angle)
@@ -217,15 +217,20 @@ class ExtendWallsToPolylinePoint(bpy.types.Operator, PolylineOperator, tool.Ifc.
                 tool.Blender.set_active_object(snap_obj)
                 ExtendWallsToWall._execute(self, context)
             else:
-                point = context.scene.BIMPolylineProperties.insertion_polyline[0].polyline_points[1]
-                core.extend_walls(
+                obj = context.active_object
+                element = tool.Ifc.get_entity(obj)
+                layers = tool.Model.get_material_layer_parameters(element)
+                axis = tool.Model.get_wall_axis(obj, layers)
+                p1, p2 = ifcopenshell.util.representation.get_reference_line(element)
+                # point = context.scene.BIMPolylineProperties.insertion_polyline[0].polyline_points[1]
+                core.edit_wall_axis(
                     tool.Ifc,
                     tool.Blender,
                     tool.Geometry,
                     DumbWallJoiner(),
                     tool.Model,
-                    Vector((point.x, point.y, point.z)),
-                    self.connection,
+                    axis["reference"][0],
+                    axis["reference"][1],
                 )
 
             tool.Polyline.clear_polyline()
@@ -1313,6 +1318,7 @@ class DumbWallJoiner:
             bonsai.core.geometry.edit_object_placement(tool.Ifc, tool.Geometry, tool.Surveyor, obj=wall1)
         element1 = tool.Ifc.get_entity(wall1)
         p1, p2 = ifcopenshell.util.representation.get_reference_line(element1)
+        print(p1, p2)
         unit_scale = ifcopenshell.util.unit.calculate_unit_scale(tool.Ifc.get())
         target = (wall1.matrix_world.inverted() @ target).to_2d() / unit_scale
         intersect, _ = mathutils.geometry.intersect_point_line(target, p1, p2)
