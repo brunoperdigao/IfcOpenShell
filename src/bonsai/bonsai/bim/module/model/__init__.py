@@ -76,6 +76,7 @@ classes = (
     wall.ExtendWallsToUnderside,
     wall.ExtendWallsToWall,
     wall.ExtendWallsToPolylinePoint,
+    wall.QuickEditWalls,
     wall.FlipWall,
     wall.MergeWall,
     wall.OffsetWalls,

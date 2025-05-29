@@ -41,9 +41,10 @@ from bonsai.bim.ifc import IfcStore
 from math import pi, sin, cos, degrees, atan2
 from mathutils import Vector, Matrix
 from bonsai.bim.module.model.opening import FilledOpeningGenerator
-from bonsai.bim.module.model.decorator import PolylineDecorator, ProductDecorator
+from bonsai.bim.module.model.decorator import PolylineDecorator, ProductDecorator, QuickEditDecorator
 from bonsai.bim.module.model.polyline import PolylineOperator
 from typing import Optional, assert_never, TYPE_CHECKING, get_args, Literal, Union, Any
+from bpy_extras.view3d_utils import location_3d_to_region_2d, region_2d_to_location_3d
 
 
 class UnjoinWalls(bpy.types.Operator, tool.Ifc.Operator):
@@ -121,6 +122,253 @@ class ExtendWallsToWall(bpy.types.Operator, tool.Ifc.Operator):
             tool.Model.recreate_wall(target_element, target_obj)
         else:
             self.report({"ERROR"}, "Please select at least one LAYER2 element and one active LAYER2 element")
+
+
+class QuickEditWalls(bpy.types.Operator, PolylineOperator, tool.Ifc.Operator):
+    bl_idname = "bim.quick_edit_walls"
+    bl_label = "Quick Edit Walls"
+    bl_description = "Quick Edit Walls"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        is_view_3d = context.space_data.type == "VIEW_3D"
+        walls = True
+        for obj in context.selected_objects:
+            if not tool.Ifc.get_entity(obj).is_a("IfcWall"):
+                walls = False
+
+        return bool(context.selected_objects) and is_view_3d and walls
+    def __init__(self, *args, **kwargs):
+        bpy.types.Operator.__init__(self, *args, **kwargs)
+        PolylineOperator.__init__(self)
+        self.input_options = ["D", "A", "X", "Y", "Z"]
+        self.input_ui = tool.Polyline.create_input_ui(input_options=self.input_options)
+        self.axis = None
+        self.selected = None
+        self.height = None
+        self.moving = None
+        self.connection = None
+
+    def modal(self, context, event):
+        return IfcStore.execute_ifc_operator(self, context, event, method="MODAL")
+
+    def _modal(self, context, event):
+
+        PolylineDecorator.update(event, self.tool_state, self.input_ui, self.snapping_points[0])
+        self.handle_lock_axis(context, event)  # Must come before "PASS_THROUGH"
+        self.handle_mouse_move(context, event, should_round=True)
+
+        # TODO Enter to confirm point. Axis or Height
+        # TODO E instead of G to use the extend instead of changing the point freely
+        # TODO Create interactive text dimension label and allow to change it.
+        # TODO Allow flip
+        # TODO Allow offset
+        # TODO Allow x_angle
+
+        if event.value == "PRESS" and event.type == "LEFTMOUSE":
+            mouse_pos = event.mouse_region_x, event.mouse_region_y
+            for vertice in self.axis:
+                vec_2d = location_3d_to_region_2d(context.region, context.region_data, vertice["vector"])
+                selection_area = (
+                    vec_2d[0] - 10,
+                    vec_2d[1] - 10,
+                    vec_2d[0] + 10,
+                    vec_2d[1] + 10,
+                )
+                if (
+                    mouse_pos[0] > selection_area[0]
+                    and mouse_pos[1] > selection_area[1]
+                    and mouse_pos[0] < selection_area[2]
+                    and mouse_pos[1] < selection_area[3]
+                    ):
+                        vertice["selected"] = True
+                        self.selected = vertice["type"]
+                else:
+                    vertice["selected"] = False
+            QuickEditDecorator.update(self.axis)
+            tool.Blender.update_viewport()
+        
+        if event.value == "RELEASE" and event.type in {"G"}:
+            self.moving = True
+            PolylineDecorator.install(context)
+            direcion = self.axis[1]["vector"] - self.axis[0]["vector"]
+            angle = atan2(direcion.y, direcion.x)
+            value = None
+
+            if self.selected == "axis_start":
+                value = [v["vector"] for v in self.axis if v["type"] == "axis_end"][0]
+                self.tool_state.lock_axis = True
+                self.tool_state.snap_angle = degrees(angle)
+                self.connection = "ATSTART"
+            elif self.selected == "axis_end":
+                value = [v["vector"] for v in self.axis if v["type"] == "axis_start"][0]
+                self.tool_state.lock_axis = True
+                self.tool_state.snap_angle = degrees(angle)
+                self.connection = "ATEND"
+            elif self.selected == "height":
+                value = [v["vector"] for v in self.axis if v["type"] == "height"][0]
+                self.tool_state.use_default_container = False
+                self.tool_state.plane_method = "YZ" if self.tool_state.plane_method != "YZ" else None
+                self.tool_state.axis_method = None
+                tool.Blender.update_viewport()
+                # get_plane_origin()
+                self.tool_state.lock_axis = True
+                self.tool_state.snap_angle = degrees(angle)
+            print(value, self.tool_state.snap_angle)
+
+            self.input_ui.set_value("X", value.x)
+            self.input_ui.set_value("Y", value.y)
+            self.input_ui.set_value("Z", value.z)
+            result = tool.Polyline.insert_polyline_point(self.input_ui, self.tool_state)
+            PolylineDecorator.update(event, self.tool_state, self.input_ui, self.snapping_points[0])
+            tool.Blender.update_viewport()
+
+        if event.type in {"MIDDLEMOUSE", "WHEELUPMOUSE", "WHEELDOWNMOUSE"}:
+            return {"PASS_THROUGH"}
+
+        if event.value == "PRESS" and event.type in {"RIGHTMOUSE"}:
+            self.moving = False
+            PolylineDecorator.uninstall()
+            tool.Blender.update_viewport()
+
+        if self.moving:
+            self.handle_mouse_move(context, event, should_round=True)
+            self.choose_axis(event)
+            self.handle_snap_selection(context, event)
+
+            if event.value == "RELEASE" and event.type in {"RET", "NUMPAD_ENTER", "RIGHTMOUSE", "LEFTMOUSE"} and self.selected in {"axis_start", "axis_end"}:
+                self.moving = False
+                if self.tool_state.is_input_on:
+                    is_valid = self.recalculate_inputs(context)
+                    if is_valid:
+                        result = tool.Polyline.insert_polyline_point(self.input_ui, self.tool_state)
+                        if result:
+                            self.report({"WARNING"}, result)
+                else:
+                    result = tool.Polyline.insert_polyline_point(self.input_ui, self.tool_state)
+                    if result:
+                        self.report({"WARNING"}, result)
+
+                snap_prop = context.scene.BIMPolylineProperties.snap_mouse_point[0]
+                snap_obj = bpy.data.objects.get(snap_prop.snap_object)
+                if snap_obj and tool.Ifc.get_entity(snap_obj).is_a("IfcWall"):
+                    tool.Blender.set_active_object(snap_obj)
+                    ExtendWallsToWall._execute(self, context)
+                else:
+                    point = context.scene.BIMPolylineProperties.insertion_polyline[0].polyline_points[1]
+                    core.extend_walls(
+                        tool.Ifc,
+                        tool.Blender,
+                        tool.Geometry,
+                        DumbWallJoiner(),
+                        tool.Model,
+                        Vector((point.x, point.y, point.z)),
+                        self.connection,
+                    )
+
+                tool.Polyline.clear_polyline()
+                context.workspace.status_text_set(text=None)
+                PolylineDecorator.uninstall()
+                QuickEditDecorator.uninstall()
+                tool.Blender.update_viewport()
+                return {"FINISHED"}
+
+            if event.value == "RELEASE" and event.type in {"RET", "NUMPAD_ENTER", "RIGHTMOUSE", "LEFTMOUSE"} and self.selected in {"height"}:
+                self.moving = False
+                print("INPUT", self.input_ui)
+                if self.tool_state.is_input_on:
+                    is_valid = self.recalculate_inputs(context)
+                    if is_valid:
+                        result = tool.Polyline.insert_polyline_point(self.input_ui, self.tool_state)
+                        if result:
+                            self.report({"WARNING"}, result)
+                else:
+                    result = tool.Polyline.insert_polyline_point(self.input_ui, self.tool_state)
+                    if result:
+                        self.report({"WARNING"}, result)
+
+                print("RESULT", result)
+                for vertice in self.axis:
+                    if vertice["type"] == "height":
+                        point = context.scene.BIMPolylineProperties.insertion_polyline[0].polyline_points[1]
+                        print(point.z)
+                        self.depth = point.z
+                        ChangeExtrusionDepth._execute(self, context)
+
+                tool.Polyline.clear_polyline()
+                context.workspace.status_text_set(text=None)
+                PolylineDecorator.uninstall()
+                QuickEditDecorator.uninstall()
+                tool.Blender.update_viewport()
+                return {"FINISHED"}
+
+            self.handle_keyboard_input(context, event)
+
+            cancel = self.handle_cancelation(context, event)
+            if cancel is not None:
+                return cancel
+            
+        '''
+        if (event.type == "MOUSEMOVE" or event.type == "INBETWEEN_MOUSEMOVE") and self.moving:  # noqa: None: None: None: None: None: None: None
+            for vertice in self.axis:
+                if vertice["selected"]:
+                    mouse_pos = event.mouse_region_x, event.mouse_region_y
+                    ray_origin, ray_target, ray_direction = tool.Raycast.get_viewport_ray_data(context, event, mouse_pos)
+                    loc = region_2d_to_location_3d(context.region, context.region_data, mouse_pos, ray_direction)
+                    vertice["vector"] = loc
+            QuickEditDecorator.update(self.axis)
+            tool.Blender.update_viewport()
+        '''
+
+        if event.value == "RELEASE" and event.type in {"H"}:
+            for vertice in self.axis:
+                if vertice["type"] == "height":
+                    self.depth = vertice["vector"].z
+                    ChangeExtrusionDepth._execute(self, context)
+
+        if event.value == "RELEASE" and event.type in {"RET"}:
+            wall = context.active_object
+            element = tool.Ifc.get_entity(wall)
+            o1, o2 = ifcopenshell.util.representation.get_reference_line(element)
+            print("p1, p2, primeiro", o1, o2)
+            v1 = wall.matrix_world.inverted() @ self.axis[0]["vector"]
+            v2 = wall.matrix_world.inverted() @ self.axis[1]["vector"]
+            print("v1, v2", v1, v2)
+            diff1 = np.asarray((v1.x, v1.y)) - o1
+            diff2 = np.asarray((v2.x, v2.y)) - o2
+            p1 = o1 + diff1
+            p2 = o2 + diff2
+            print("p1, p2", p1, p2)
+            DumbWallJoiner().set_axis(element, p1, p2)
+            tool.Model.recreate_wall(element, wall)
+            QuickEditDecorator.uninstall()
+            tool.Blender.update_viewport()
+            return {"FINISHED"}
+
+
+        if event.value == "RELEASE" and event.type in {"ESC"}:
+            QuickEditDecorator.uninstall()
+            tool.Blender.update_viewport()
+            return {"CANCELLED"}
+
+        return {"RUNNING_MODAL"}
+
+    def invoke(self, context, event):
+        super().invoke(context, event)
+        PolylineDecorator.uninstall()
+        self.tool_state.use_default_container = True
+        self.tool_state.plane_method = "XY"
+        # Update snaps after changing plane_method
+        detected_snaps = tool.Snap.detect_snapping_points(context, event, self.objs_2d_bbox, self.tool_state)
+        self.snapping_points = tool.Snap.select_snapping_points(context, event, self.tool_state, detected_snaps)
+        tool.Polyline.calculate_distance_and_angle(context, self.input_ui, self.tool_state)
+        tool.Blender.update_viewport()
+        QuickEditDecorator.install(context)
+        self.axis = QuickEditDecorator.get_axis(context)
+        tool.Blender.update_viewport()
+        # context.window_manager.modal_handler_add(self)
+        return {"RUNNING_MODAL"}
 
 
 class ExtendWallsToPolylinePoint(bpy.types.Operator, PolylineOperator, tool.Ifc.Operator):

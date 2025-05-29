@@ -19,23 +19,18 @@
 from __future__ import annotations
 import bpy
 import blf
-import bpy
 import gpu
-import gpu_extras
 import bmesh
-import ifcopenshell
 import bonsai.tool as tool
 import math
+import ifcopenshell
 from math import sin, cos, radians
 from bpy.types import SpaceView3D
 from bpy_extras import view3d_utils
 from mathutils import Vector, Matrix
 from gpu_extras.batch import batch_for_shader
 from gpu_extras.presets import draw_circle_2d
-from typing import Union
-from bonsai.bim.module.drawing.helper import format_distance
-from itertools import chain
-from typing import Union, Any
+from typing import Any
 
 
 def transparent_color(color, alpha=0.1):
@@ -1054,3 +1049,95 @@ class FaceAreaDecorator:
                 self.draw_batch("POINTS", data["verts"], decorator_color)
                 self.draw_batch("LINES", data["verts"], decorator_color, data["edges"])
                 self.draw_batch("TRIS", data["verts"], transparent_color(decorator_color, alpha=0.5), data["tris"])
+
+
+class QuickEditDecorator:
+    is_installed = False
+    handlers = []
+    # event = None
+    # input_type = None
+    # input_ui = None
+    # angle_snap_mat = None
+    # angle_snap_loc = None
+    # use_default_container = False
+    # instructions = None
+    # snap_info = None
+    # tool_state = None
+    # relating_type = None
+
+    @classmethod
+    def install(cls, context, ui_only=False):
+        if cls.is_installed:
+            cls.uninstall()
+        handler = cls()
+        cls.handlers.append(SpaceView3D.draw_handler_add(handler.draw_gizmos, (context,), "WINDOW", "POST_VIEW"))
+        cls.is_installed = True
+
+    @classmethod
+    def uninstall(cls):
+        for handler in cls.handlers:
+            try:
+                SpaceView3D.draw_handler_remove(handler, "WINDOW")
+            except ValueError:
+                pass
+        cls.is_installed = False
+
+    @classmethod
+    def update(cls, vertices):
+        cls.vertices = vertices
+
+    @classmethod
+    def get_axis(cls, context):
+        obj = context.active_object
+        element = tool.Ifc.get_entity(obj)
+        layers = tool.Model.get_material_layer_parameters(element)
+        axis = tool.Model.get_wall_axis(obj, layers)
+        start = Vector((axis["reference"][0][0], axis["reference"][0][1], obj.location.z))
+        cls.start = cls.create_interactive_vertices(context, "axis_start", start)
+        end = Vector((axis["reference"][1][0], axis["reference"][1][1], obj.location.z))
+        cls.end = cls.create_interactive_vertices(context, "axis_end", end)
+
+        representation = ifcopenshell.util.representation.get_representation(element, "Model", "Body", "MODEL_VIEW")
+        if not representation:
+            return
+        extrusion = tool.Model.get_extrusion(representation)
+        if not extrusion:
+            return
+        height = Vector((axis["reference"][0][0], axis["reference"][0][1], extrusion.Depth))
+        cls.height = cls.create_interactive_vertices(context, "height", height)
+
+        cls.vertices = [cls.start, cls.end, cls.height]
+        return cls.vertices
+
+
+    @classmethod
+    def create_interactive_vertices(cls, context, type: str, vec: Vector) -> dict:
+        return {
+            "vector": vec,
+            "type": type,
+            "selected": False,
+            "input": False,
+        }
+        
+    def draw_batch(self, shader_type, content_pos, color, indices=None):
+        if not tool.Blender.validate_shader_batch_data(content_pos, indices):
+            return
+        shader = self.line_shader if shader_type == "LINES" else self.shader
+        batch = batch_for_shader(shader, shader_type, {"pos": content_pos}, indices=indices)
+        shader.uniform_float("color", color)
+        batch.draw(shader)
+
+    def draw_gizmos(self, context: bpy.types.Context):
+        self.addon_prefs = tool.Blender.get_addon_preferences()
+        self.line_shader = gpu.shader.from_builtin("POLYLINE_UNIFORM_COLOR")
+        self.line_shader.bind()  # required to be able to change uniforms of the shader
+        self.line_shader.uniform_float("viewportSize", (context.region.width, context.region.height))
+        self.shader = gpu.shader.from_builtin("UNIFORM_COLOR")
+        self.line_shader.uniform_float("lineWidth", 2.0)
+        gpu.state.point_size_set(6)
+        gpu.state.blend_set("ALPHA")
+        for vertice in self.vertices:
+            decorator_color = self.addon_prefs.decorator_color_special
+            if vertice["selected"]:
+                decorator_color = (0, 1, 0, 1)
+            self.draw_batch("POINTS", [vertice["vector"]], decorator_color)
