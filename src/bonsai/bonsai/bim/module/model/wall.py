@@ -210,11 +210,12 @@ class QuickEditWalls(bpy.types.Operator, PolylineOperator, tool.Ifc.Operator):
                 value = [v["vector"] for v in self.axis if v["type"] == "height"][0]
                 self.tool_state.use_default_container = False
                 self.tool_state.plane_method = "YZ" if self.tool_state.plane_method != "YZ" else None
+                self.tool_state.plane_origin = value
                 self.tool_state.axis_method = None
                 tool.Blender.update_viewport()
                 # get_plane_origin()
                 self.tool_state.lock_axis = True
-                self.tool_state.snap_angle = degrees(angle)
+                self.tool_state.snap_angle = 90 # TODO This angle should be based on x_angle 
             print(value, self.tool_state.snap_angle)
 
             self.input_ui.set_value("X", value.x)

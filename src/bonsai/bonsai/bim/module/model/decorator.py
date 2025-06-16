@@ -1103,10 +1103,11 @@ class QuickEditDecorator:
         extrusion = tool.Model.get_extrusion(representation)
         if not extrusion:
             return
-        height = Vector((axis["reference"][0][0], axis["reference"][0][1], extrusion.Depth))
+        height = Vector((axis["reference"][0][0], axis["reference"][0][1], extrusion.Depth / 1000)) # TODO Uso Unit Scale
         cls.height = cls.create_interactive_vertices(context, "height", height)
 
         cls.vertices = [cls.start, cls.end, cls.height]
+        print("DECO", cls.vertices)
         return cls.vertices
 
 
@@ -1137,6 +1138,7 @@ class QuickEditDecorator:
         gpu.state.point_size_set(6)
         gpu.state.blend_set("ALPHA")
         for vertice in self.vertices:
+            print("LOOP", vertice)
             decorator_color = self.addon_prefs.decorator_color_special
             if vertice["selected"]:
                 decorator_color = (0, 1, 0, 1)
