@@ -145,6 +145,7 @@ class QuickEditWalls(bpy.types.Operator, PolylineOperator, tool.Ifc.Operator):
         self.input_options = ["D", "A", "X", "Y", "Z"]
         self.input_ui = tool.Polyline.create_input_ui(input_options=self.input_options)
         self.vertices = None
+        self.dimensions = None
         self.selected = None
         self.height = None
         self.moving = None
@@ -187,10 +188,8 @@ class QuickEditWalls(bpy.types.Operator, PolylineOperator, tool.Ifc.Operator):
                 else:
                     vertice["selected"] = False
             for dim in self.dimensions:
-                print("AREA", dim["area"][0])
-                print("AREA", dim["area"][1])
-                vec_2d_1 = location_3d_to_region_2d(context.region, context.region_data, dim["area"][0])
-                vec_2d_2 = dim["area"][1]
+                vec_2d_1 = location_3d_to_region_2d(context.region, context.region_data, dim["position"])
+                vec_2d_2 = dim["length"]
                 selection_area = (
                     vec_2d_1[0] - 10,
                     vec_2d_1[1] - 10,
@@ -208,7 +207,7 @@ class QuickEditWalls(bpy.types.Operator, PolylineOperator, tool.Ifc.Operator):
                         print("DIM", dim)
                 else:
                     dim["selected"] = False
-            QuickEditDecorator.update(self.vertices)
+            QuickEditDecorator.update(self.vertices, self.dimensions)
             tool.Blender.update_viewport()
         
         if event.value == "RELEASE" and event.type in {"G"}:
@@ -389,8 +388,7 @@ class QuickEditWalls(bpy.types.Operator, PolylineOperator, tool.Ifc.Operator):
         tool.Blender.update_viewport()
         QuickEditDecorator.install(context)
         self.vertices = QuickEditDecorator.get_axis(context)
-        self.dimensions = QuickEditDecorator().draw_dimensions(context)
-        print("DIM", self.dimensions)
+        self.dimensions = QuickEditDecorator.get_dimensions(context)
         tool.Blender.update_viewport()
         # context.window_manager.modal_handler_add(self)
         return {"RUNNING_MODAL"}

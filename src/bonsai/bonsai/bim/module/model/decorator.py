@@ -1085,8 +1085,9 @@ class QuickEditDecorator:
         cls.is_installed = False
 
     @classmethod
-    def update(cls, vertices):
+    def update(cls, vertices, dimensions):
         cls.vertices = vertices
+        cls.dimensions = dimensions
 
     @classmethod
     def get_axis(cls, context):
@@ -1125,11 +1126,12 @@ class QuickEditDecorator:
         }
 
     @classmethod
-    def create_interactive_text(cls, context, type: str, text: str, area: list) -> dict:
+    def create_interactive_text(cls, context, type: str, text: str, position: Vector, length: Vector) -> dict:
         return {
-            "text": text,
-            "area": area,
             "type": type,
+            "text": text,
+            "position": position,
+            "length": length,
             "selected": False,
             "input": False,
         }
@@ -1142,6 +1144,25 @@ class QuickEditDecorator:
         shader.uniform_float("color", color)
         batch.draw(shader)
 
+    @classmethod
+    def get_dimensions(cls, context: bpy.types.Context):
+        font_id = 1
+        font_size = tool.Blender.scale_font_size(12)
+        blf.size(font_id, font_size)
+
+        text = str((cls.end["vector"] - cls.start["vector"]).length)
+        dim_text_pos = (cls.start["vector"] + cls.end["vector"]) / 2
+        text_length = blf.dimensions(font_id, text)
+        length = cls.create_interactive_text(context, "text_length", text, Vector(dim_text_pos), Vector(text_length))
+
+        text = str(cls.height["vector"])
+        dim_text_pos = (cls.start["vector"] + cls.height["vector"]) / 2
+        text_length = blf.dimensions(font_id, text)
+        height = cls.create_interactive_text(context, "text_height", text, Vector(dim_text_pos), Vector(text_length))
+        cls.dimensions = [length, height]
+        
+        return cls.dimensions
+
     def draw_dimensions(self, context: bpy.types.Context):
         region = context.region
         rv3d = region.data
@@ -1152,27 +1173,19 @@ class QuickEditDecorator:
         blf.size(self.font_id, font_size)
         blf.enable(self.font_id, blf.SHADOW)
         blf.shadow(self.font_id, 6, 0, 0, 0, 1)
-        color = self.addon_prefs.decorations_colour
-        blf.color(self.font_id, *color)
 
-        text = str((self.end["vector"] - self.start["vector"]).length)
-        dim_text_pos = (self.start["vector"] + self.end["vector"]) / 2
-        dim_text_coords = view3d_utils.location_3d_to_region_2d(region, rv3d, dim_text_pos)
-        text_pos = blf.position(self.font_id, dim_text_coords[0], dim_text_coords[1], 0)
-        text_length = blf.dimensions(self.font_id, text)
-        PolylineDecorator().draw_text_background(context, dim_text_coords, text_length)
-        blf.draw(self.font_id, text)
-        length = self.create_interactive_text(context, "length", text, [Vector(dim_text_pos), Vector(text_length)])
-
-        text = str(self.height["vector"])
-        dim_text_pos = (self.start["vector"] + self.height["vector"]) / 2
-        dim_text_coords = view3d_utils.location_3d_to_region_2d(region, rv3d, dim_text_pos)
-        blf.position(self.font_id, dim_text_coords[0], dim_text_coords[1], 0)
-        text_length = blf.dimensions(self.font_id, text)
-        PolylineDecorator().draw_text_background(context, dim_text_coords, text_length)
-        blf.draw(self.font_id, text)
-        height = self.create_interactive_text(context, "height", text, [Vector(dim_text_pos), Vector(text_length)])
-        return length, height
+        for dim in self.dimensions:
+            color = self.addon_prefs.decorations_colour
+            text = dim["text"]
+            dim_text_pos = dim["position"]
+            dim_text_coords = view3d_utils.location_3d_to_region_2d(region, rv3d, dim_text_pos)
+            blf.position(self.font_id, dim_text_coords[0], dim_text_coords[1], 0)
+            text_length = blf.dimensions(self.font_id, text)
+            PolylineDecorator().draw_text_background(context, dim_text_coords, text_length)
+            if dim["selected"]:
+                color = (0, 0, 1, 1)
+            blf.color(self.font_id, *color)
+            blf.draw(self.font_id, text)
         
     def draw_gizmos(self, context: bpy.types.Context):
         self.addon_prefs = tool.Blender.get_addon_preferences()
