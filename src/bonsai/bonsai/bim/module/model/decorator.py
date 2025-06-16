@@ -318,6 +318,7 @@ class PolylineDecorator:
     snap_info = None
     tool_state = None
     relating_type = None
+    shader = gpu.shader.from_builtin("UNIFORM_COLOR")
 
     @classmethod
     def install(cls, context, ui_only=False):
@@ -1071,6 +1072,7 @@ class QuickEditDecorator:
             cls.uninstall()
         handler = cls()
         cls.handlers.append(SpaceView3D.draw_handler_add(handler.draw_gizmos, (context,), "WINDOW", "POST_VIEW"))
+        cls.handlers.append(SpaceView3D.draw_handler_add(handler.draw_dimensions, (context,), "WINDOW", "POST_PIXEL"))
         cls.is_installed = True
 
     @classmethod
@@ -1105,16 +1107,28 @@ class QuickEditDecorator:
             return
         height = Vector((axis["reference"][0][0], axis["reference"][0][1], extrusion.Depth / 1000)) # TODO Uso Unit Scale
         cls.height = cls.create_interactive_vertices(context, "height", height)
-
         cls.vertices = [cls.start, cls.end, cls.height]
-        print("DECO", cls.vertices)
-        return cls.vertices
 
+        # length = cls.create_interactive_text(context, "length", (end - start).length)
+        # self.height = extrusion.Depth / 1000
+        # height = cls.create_interactive_text(context, "height", extrusion.Depth / 1000)
+        # cls.dimensions = [length, height]
+        return cls.vertices
 
     @classmethod
     def create_interactive_vertices(cls, context, type: str, vec: Vector) -> dict:
         return {
             "vector": vec,
+            "type": type,
+            "selected": False,
+            "input": False,
+        }
+
+    @classmethod
+    def create_interactive_text(cls, context, type: str, text: str, area: list) -> dict:
+        return {
+            "text": text,
+            "area": area,
             "type": type,
             "selected": False,
             "input": False,
@@ -1128,6 +1142,38 @@ class QuickEditDecorator:
         shader.uniform_float("color", color)
         batch.draw(shader)
 
+    def draw_dimensions(self, context: bpy.types.Context):
+        region = context.region
+        rv3d = region.data
+        self.addon_prefs = tool.Blender.get_addon_preferences()
+        self.font_id = 1
+        self.shader = gpu.shader.from_builtin("UNIFORM_COLOR")
+        font_size = tool.Blender.scale_font_size(12)
+        blf.size(self.font_id, font_size)
+        blf.enable(self.font_id, blf.SHADOW)
+        blf.shadow(self.font_id, 6, 0, 0, 0, 1)
+        color = self.addon_prefs.decorations_colour
+        blf.color(self.font_id, *color)
+
+        text = str((self.end["vector"] - self.start["vector"]).length)
+        dim_text_pos = (self.start["vector"] + self.end["vector"]) / 2
+        dim_text_coords = view3d_utils.location_3d_to_region_2d(region, rv3d, dim_text_pos)
+        text_pos = blf.position(self.font_id, dim_text_coords[0], dim_text_coords[1], 0)
+        text_length = blf.dimensions(self.font_id, text)
+        PolylineDecorator().draw_text_background(context, dim_text_coords, text_length)
+        blf.draw(self.font_id, text)
+        length = self.create_interactive_text(context, "length", text, [Vector(dim_text_pos), Vector(text_length)])
+
+        text = str(self.height["vector"])
+        dim_text_pos = (self.start["vector"] + self.height["vector"]) / 2
+        dim_text_coords = view3d_utils.location_3d_to_region_2d(region, rv3d, dim_text_pos)
+        blf.position(self.font_id, dim_text_coords[0], dim_text_coords[1], 0)
+        text_length = blf.dimensions(self.font_id, text)
+        PolylineDecorator().draw_text_background(context, dim_text_coords, text_length)
+        blf.draw(self.font_id, text)
+        height = self.create_interactive_text(context, "height", text, [Vector(dim_text_pos), Vector(text_length)])
+        return length, height
+        
     def draw_gizmos(self, context: bpy.types.Context):
         self.addon_prefs = tool.Blender.get_addon_preferences()
         self.line_shader = gpu.shader.from_builtin("POLYLINE_UNIFORM_COLOR")
@@ -1138,7 +1184,6 @@ class QuickEditDecorator:
         gpu.state.point_size_set(6)
         gpu.state.blend_set("ALPHA")
         for vertice in self.vertices:
-            print("LOOP", vertice)
             decorator_color = self.addon_prefs.decorator_color_special
             if vertice["selected"]:
                 decorator_color = (0, 1, 0, 1)

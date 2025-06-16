@@ -144,7 +144,7 @@ class QuickEditWalls(bpy.types.Operator, PolylineOperator, tool.Ifc.Operator):
         PolylineOperator.__init__(self)
         self.input_options = ["D", "A", "X", "Y", "Z"]
         self.input_ui = tool.Polyline.create_input_ui(input_options=self.input_options)
-        self.axis = None
+        self.vertices = None
         self.selected = None
         self.height = None
         self.moving = None
@@ -168,7 +168,7 @@ class QuickEditWalls(bpy.types.Operator, PolylineOperator, tool.Ifc.Operator):
 
         if event.value == "PRESS" and event.type == "LEFTMOUSE":
             mouse_pos = event.mouse_region_x, event.mouse_region_y
-            for vertice in self.axis:
+            for vertice in self.vertices:
                 vec_2d = location_3d_to_region_2d(context.region, context.region_data, vertice["vector"])
                 selection_area = (
                     vec_2d[0] - 10,
@@ -186,28 +186,50 @@ class QuickEditWalls(bpy.types.Operator, PolylineOperator, tool.Ifc.Operator):
                         self.selected = vertice["type"]
                 else:
                     vertice["selected"] = False
-            QuickEditDecorator.update(self.axis)
+            for dim in self.dimensions:
+                print("AREA", dim["area"][0])
+                print("AREA", dim["area"][1])
+                vec_2d_1 = location_3d_to_region_2d(context.region, context.region_data, dim["area"][0])
+                vec_2d_2 = dim["area"][1]
+                selection_area = (
+                    vec_2d_1[0] - 10,
+                    vec_2d_1[1] - 10,
+                    vec_2d_1[0] + vec_2d_2[0] + 10,
+                    vec_2d_1[1] + vec_2d_2[1]  + 10,
+                )
+                if (
+                    mouse_pos[0] > selection_area[0]
+                    and mouse_pos[1] > selection_area[1]
+                    and mouse_pos[0] < selection_area[2]
+                    and mouse_pos[1] < selection_area[3]
+                    ):
+                        dim["selected"] = True
+                        self.selected = dim["type"]
+                        print("DIM", dim)
+                else:
+                    dim["selected"] = False
+            QuickEditDecorator.update(self.vertices)
             tool.Blender.update_viewport()
         
         if event.value == "RELEASE" and event.type in {"G"}:
             self.moving = True
             PolylineDecorator.install(context)
-            direcion = self.axis[1]["vector"] - self.axis[0]["vector"]
+            direcion = self.vertices[1]["vector"] - self.vertices[0]["vector"]
             angle = atan2(direcion.y, direcion.x)
             value = None
 
             if self.selected == "axis_start":
-                value = [v["vector"] for v in self.axis if v["type"] == "axis_end"][0]
+                value = [v["vector"] for v in self.vertices if v["type"] == "axis_end"][0]
                 self.tool_state.lock_axis = True
                 self.tool_state.snap_angle = degrees(angle)
                 self.connection = "ATSTART"
             elif self.selected == "axis_end":
-                value = [v["vector"] for v in self.axis if v["type"] == "axis_start"][0]
+                value = [v["vector"] for v in self.vertices if v["type"] == "axis_start"][0]
                 self.tool_state.lock_axis = True
                 self.tool_state.snap_angle = degrees(angle)
                 self.connection = "ATEND"
             elif self.selected == "height":
-                value = [v["vector"] for v in self.axis if v["type"] == "height"][0]
+                value = [v["vector"] for v in self.vertices if v["type"] == "height"][0]
                 self.tool_state.use_default_container = False
                 self.tool_state.plane_method = "YZ" if self.tool_state.plane_method != "YZ" else None
                 self.tool_state.plane_origin = value
@@ -290,7 +312,7 @@ class QuickEditWalls(bpy.types.Operator, PolylineOperator, tool.Ifc.Operator):
                         self.report({"WARNING"}, result)
 
                 print("RESULT", result)
-                for vertice in self.axis:
+                for vertice in self.vertices:
                     if vertice["type"] == "height":
                         point = context.scene.BIMPolylineProperties.insertion_polyline[0].polyline_points[1]
                         print(point.z)
@@ -322,19 +344,19 @@ class QuickEditWalls(bpy.types.Operator, PolylineOperator, tool.Ifc.Operator):
             tool.Blender.update_viewport()
         '''
 
-        if event.value == "RELEASE" and event.type in {"H"}:
-            for vertice in self.axis:
-                if vertice["type"] == "height":
-                    self.depth = vertice["vector"].z
-                    ChangeExtrusionDepth._execute(self, context)
+        # if event.value == "RELEASE" and event.type in {"H"}:
+        #     for vertice in self.axis:
+        #         if vertice["type"] == "height":
+        #             self.depth = vertice["vector"].z
+        #             ChangeExtrusionDepth._execute(self, context)
 
         if event.value == "RELEASE" and event.type in {"RET"}:
             wall = context.active_object
             element = tool.Ifc.get_entity(wall)
             o1, o2 = ifcopenshell.util.representation.get_reference_line(element)
             print("p1, p2, primeiro", o1, o2)
-            v1 = wall.matrix_world.inverted() @ self.axis[0]["vector"]
-            v2 = wall.matrix_world.inverted() @ self.axis[1]["vector"]
+            v1 = wall.matrix_world.inverted() @ self.vertices[0]["vector"]
+            v2 = wall.matrix_world.inverted() @ self.vertices[1]["vector"]
             print("v1, v2", v1, v2)
             diff1 = np.asarray((v1.x, v1.y)) - o1
             diff2 = np.asarray((v2.x, v2.y)) - o2
@@ -366,7 +388,9 @@ class QuickEditWalls(bpy.types.Operator, PolylineOperator, tool.Ifc.Operator):
         tool.Polyline.calculate_distance_and_angle(context, self.input_ui, self.tool_state)
         tool.Blender.update_viewport()
         QuickEditDecorator.install(context)
-        self.axis = QuickEditDecorator.get_axis(context)
+        self.vertices = QuickEditDecorator.get_axis(context)
+        self.dimensions = QuickEditDecorator().draw_dimensions(context)
+        print("DIM", self.dimensions)
         tool.Blender.update_viewport()
         # context.window_manager.modal_handler_add(self)
         return {"RUNNING_MODAL"}
