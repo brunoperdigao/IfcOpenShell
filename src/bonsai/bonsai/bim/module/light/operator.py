@@ -28,11 +28,13 @@ from datetime import datetime
 import bpy
 import bonsai.tool as tool
 from pathlib import Path
-from typing import Union, Optional, Sequence
+from typing import Union, Optional
+from collections.abc import Sequence
 import json
 import math
 import time
 import ifcopenshell
+import ifcopenshell.util.geolocation
 import webbrowser
 import ifcopenshell.geom
 import multiprocessing
@@ -79,6 +81,7 @@ class ExportOBJ(bpy.types.Operator):
         serializer_settings.set("use-element-guids", True)
         settings.set("use-world-coords", True)
 
+        ifc_file: ifcopenshell.file
         if should_load_from_memory:
             ifc_file = tool.Ifc.get()
 
@@ -566,6 +569,7 @@ class RefreshIFCMaterials(bpy.types.Operator):
 
     def execute(self, context):
         props = context.scene.radiance_exporter_properties
+        ifc_file: ifcopenshell.file
         ifc_file = tool.Ifc.get() if props.should_load_from_memory else ifcopenshell.open(props.ifc_file)
 
         props.materials.clear()

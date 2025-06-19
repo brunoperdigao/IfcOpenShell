@@ -36,6 +36,7 @@ import bonsai.tool as tool
 from ifcopenshell.util.file import IfcHeaderExtractor
 from bonsai.bim.prop import Attribute
 from typing import Optional, TYPE_CHECKING
+from natsort import natsorted
 
 
 class IFCFileSelector:
@@ -1167,6 +1168,22 @@ class BIM_PT_tab_operations(Panel):
 
 def refresh():
     UIData.is_loaded = False
+    EnumData.data.clear()
+
+
+class EnumData:
+    data: dict[str, tool.Blender.BLENDER_ENUM_ITEMS] = {}
+
+    @classmethod
+    def get_data(cls, identifier: str) -> tool.Blender.BLENDER_ENUM_ITEMS:
+        if identifier not in EnumData.data:
+            cls.data[identifier] = getattr(cls, identifier)()
+        return cls.data[identifier]
+
+    @classmethod
+    def organizations(cls) -> tool.Blender.BLENDER_ENUM_ITEMS:
+        organizations = tool.Ifc.get().by_type("IfcOrganization")
+        return natsorted(((str(e.id()), e.Name, "") for e in organizations), key=lambda x: x[1])
 
 
 class UIData:
@@ -1315,6 +1332,9 @@ class BIM_PT_decorators_overlay(Panel):
         row.prop(model_props, "show_wall_axis", text="Wall Axis")
         row = col.row(align=True)
         row.prop(model_props, "show_slab_direction", text="Slab Direction")
+        row = col.row(align=True)
+        row.prop(model_props, "show_cut_decorator", text="Cut Decorator")
+        row.prop(model_props, "show_cut_decorator_fill", text="Fill Cut Decorator")
 
 
 class BIM_PT_snappping(Panel):

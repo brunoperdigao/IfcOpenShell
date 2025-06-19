@@ -138,7 +138,7 @@ endif
 	# odfpy doesn't come with its own wheel, so whee'l (get it?) create it ourselves!
 	cd build && . env/$(VENV_ACTIVATE) && $(PIP) wheel odfpy --wheel-dir=./wheels
 	# Required by IFCCityJSON
-	cd build && . env/$(VENV_ACTIVATE) && $(PIP) download cjio --dest=./wheels
+	cd build && . env/$(VENV_ACTIVATE) && $(PIP) download "cjio >=0.8, <0.10" --dest=./wheels
 	# Required in general for sorting all sorts of stuff in a nice way
 	cd build && . env/$(VENV_ACTIVATE) && $(PIP) download natsort --dest=./wheels
 	# Provides express rule validation for ifcopenshell.validate
@@ -201,8 +201,7 @@ endif
 	cd build/bonsai/bim/data/gantt/ && wget https://raw.githubusercontent.com/jsGanttImproved/jsgantt-improved/master/dist/jsgantt.css
 
 	# Provides IFCJSON functionality
-	# TODO: replace with main repo if https://github.com/IFCJSON-Team/IFC2JSON_python/pull/3 is merged.
-	cd build && wget -O ifc2json.zip https://github.com/Moult/IFC2JSON_python/archive/refs/heads/feature-ios-v0.8.0.zip
+	cd build && wget -O ifc2json.zip https://github.com/IFCJSON-Team/IFC2JSON_python/archive/refs/heads/master.zip
 	cd build && unzip ifc2json.zip && rm ifc2json.zip
 	# IFCJSON doesn't have pyproject.toml, so we use python command.
 	cd build && . env/$(VENV_ACTIVATE) && cd IFC2JSON_python-*/file_converters && \

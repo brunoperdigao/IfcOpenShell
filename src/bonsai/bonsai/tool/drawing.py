@@ -38,7 +38,11 @@ import bonsai.core.geometry
 import bonsai.core.type
 import bonsai.tool as tool
 import ifcopenshell.api
+import ifcopenshell.api.context
+import ifcopenshell.api.drawing
 import ifcopenshell.api.document
+import ifcopenshell.api.pset
+import ifcopenshell.api.root
 import ifcopenshell.geom
 import ifcopenshell.util.representation
 import ifcopenshell.util.element
@@ -51,7 +55,8 @@ from shapely.ops import unary_union
 from lxml import etree
 from mathutils import Vector, Matrix
 from fractions import Fraction
-from typing import Optional, Union, Iterable, Any, Literal, Sequence, TYPE_CHECKING, NamedTuple, get_args
+from typing import Optional, Union, Any, Literal, TYPE_CHECKING, NamedTuple
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 if TYPE_CHECKING:
@@ -202,16 +207,20 @@ class Drawing(bonsai.core.tool.Drawing):
 
         if not related_object:
             related_object = bpy.context.active_object
-        related_entity = tool.Ifc.get_entity(related_object)
-        if not related_entity:
+
+        if not related_object or not (related_entity := tool.Ifc.get_entity(related_object)):
             return
 
+        ifc_file = tool.Ifc.get()
         obj_entity = tool.Ifc.get_entity(obj)
+        assert obj_entity
         assign_product = False
 
         if object_type == "STAIR_ARROW":
             if related_entity.is_a("IfcStairFlight"):
                 stair, arrow = related_object, obj
+                assert isinstance(stair.data, bpy.types.Mesh)
+                assert isinstance(arrow.data, bpy.types.Mesh)
 
                 # place the arrow
                 # NOTE: may not work correctly in EDIT mode
@@ -235,6 +244,8 @@ class Drawing(bonsai.core.tool.Drawing):
 
         elif object_type == "REVISION_CLOUD":
             revised_object, cloud = related_object, obj
+            assert isinstance(revised_object.data, bpy.types.Mesh)
+            assert isinstance(obj.data, bpy.types.Mesh)
 
             verts = [np.array(revised_object.matrix_world @ v.co) for v in revised_object.data.vertices]
             verts = [(np.around(v[[0, 1]], decimals=3)).tolist() for v in verts]
@@ -258,7 +269,9 @@ class Drawing(bonsai.core.tool.Drawing):
             assign_product = True
 
         if assign_product and not cls.get_assigned_product(obj_entity):
-            tool.Ifc.run("drawing.assign_product", relating_product=related_entity, related_object=obj_entity)
+            ifcopenshell.api.drawing.assign_product(
+                ifc_file, relating_product=related_entity, related_object=obj_entity
+            )
 
         if object_type == "TEXT":
             tool.Drawing.update_text_value(obj)
@@ -375,7 +388,7 @@ class Drawing(bonsai.core.tool.Drawing):
     def delete_drawing_elements(cls, elements: Iterable[ifcopenshell.entity_instance]) -> None:
         for element in elements:
             obj = tool.Ifc.get_object(element)
-            ifcopenshell.api.run("root.remove_product", tool.Ifc.get(), product=element)
+            ifcopenshell.api.root.remove_product(tool.Ifc.get(), product=element)
             if obj:
                 obj_data = obj.data
                 bpy.data.objects.remove(obj)
@@ -736,8 +749,8 @@ class Drawing(bonsai.core.tool.Drawing):
                 literal = cls.add_literal_to_annotation(obj, **attributes)
             else:
                 literal = ifc_file.by_id(ifc_definition_id)
-                tool.Ifc.run(
-                    "drawing.edit_text_literal",
+                ifcopenshell.api.drawing.edit_text_literal(
+                    ifc_file,
                     text_literal=literal,
                     attributes=attributes,
                 )
@@ -1186,9 +1199,8 @@ class Drawing(bonsai.core.tool.Drawing):
             ifc_file = tool.Ifc.get()
             pset = tool.Pset.get_element_pset(element, "EPset_Annotation")
             if not pset:
-                pset = ifcopenshell.api.run("pset.add_pset", ifc_file, product=element, name="EPset_Annotation")
-            ifcopenshell.api.run(
-                "pset.edit_pset",
+                pset = ifcopenshell.api.pset.add_pset(ifc_file, product=element, name="EPset_Annotation")
+            ifcopenshell.api.pset.edit_pset(
                 ifc_file,
                 pset=pset,
                 properties={"Classes": classes},
@@ -1202,9 +1214,8 @@ class Drawing(bonsai.core.tool.Drawing):
         ifc_file = tool.Ifc.get()
         pset = tool.Pset.get_element_pset(element, "EPset_Annotation")
         if not pset:
-            pset = ifcopenshell.api.run("pset.add_pset", ifc_file, product=element, name="EPset_Annotation")
-        ifcopenshell.api.run(
-            "pset.edit_pset",
+            pset = ifcopenshell.api.pset.add_pset(ifc_file, product=element, name="EPset_Annotation")
+        ifcopenshell.api.pset.edit_pset(
             ifc_file,
             pset=pset,
             properties={"Newline_At": newline_at},
@@ -1709,7 +1720,7 @@ class Drawing(bonsai.core.tool.Drawing):
         a_quaternion = a.matrix_world.to_quaternion()
         b_quaternion = b.matrix_world.to_quaternion()
         for axis in axes:
-            if abs((a_quaternion @ axis).angle((b_quaternion @ axis)) - (math.pi / 2)) < 1e-5:
+            if abs((a_quaternion @ axis).angle(b_quaternion @ axis) - (math.pi / 2)) < 1e-5:
                 return True
         return False
 

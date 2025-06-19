@@ -21,6 +21,7 @@ import ifcopenshell
 import ifcopenshell.util.date
 import ifcopenshell.util.classification
 import bonsai.tool as tool
+from typing import Any
 from bonsai.bim.ifc import IfcStore
 
 
@@ -41,6 +42,7 @@ class ClassificationsData:
         cls.data["has_classification_file"] = cls.has_classification_file()
         cls.data["classifications"] = cls.classifications()
         cls.data["available_classifications"] = cls.available_classifications()
+        cls.data["classification_source"] = cls.classification_source()
 
     @classmethod
     def has_classification_file(cls):
@@ -61,6 +63,19 @@ class ClassificationsData:
         if not IfcStore.classification_file:
             return []
         return [(str(e.id()), e.Name, "") for e in IfcStore.classification_file.by_type("IfcClassification")]
+
+    @classmethod
+    def classification_source(cls):
+        items = [
+            ("FILE", "IFC File", ""),
+            ("MANUAL", "Manual Entry", ""),
+        ]
+        bprops = tool.Bsdd.get_bsdd_props()
+        dictionaries = [(d.uri, f"bSDD: {d.name}", "") for d in bprops.dictionaries if d.is_active]
+        if dictionaries:
+            items.append(("BSDD", "All Active bSDDs", ""))
+        items.extend(dictionaries)
+        return items
 
 
 class ReferencesData:
@@ -143,10 +158,13 @@ class CostClassificationsData(ReferencesData):
         cls.data["object_type"] = "Cost"
 
     @classmethod
-    def references(cls):
-        results = []
+    def references(cls) -> list[dict[str, Any]]:
+        results: list[dict[str, Any]] = []
         props = tool.Cost.get_cost_props()
-        element = tool.Ifc.get().by_id(props.cost_items[props.active_cost_item_index].ifc_definition_id)
+        active_cost_item = props.active_cost_item
+        if not active_cost_item:
+            return results
+        element = tool.Ifc.get().by_id(active_cost_item.ifc_definition_id)
         if element:
             for reference in ifcopenshell.util.classification.get_references(element):
                 data = reference.get_info()

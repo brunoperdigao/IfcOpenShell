@@ -35,7 +35,8 @@ import ifcopenshell.util.shape
 import ifcopenshell.util.system
 import ifcopenshell.util.unit
 from decimal import Decimal
-from typing import Optional, Any, Union, Iterable
+from typing import Optional, Any, Union
+from collections.abc import Iterable
 
 if sys.version_info >= (3, 10):
     from types import EllipsisType
@@ -334,7 +335,7 @@ def _get_element_value(element: ifcopenshell.entity_instance, keys: list[str]) -
             elif isinstance(value, (list, tuple)):
                 value = len(value)
             else:
-                value = int(1)
+                value = 1
         elif key == "class":
             value = value.is_a()
         elif key == "predefined_type":

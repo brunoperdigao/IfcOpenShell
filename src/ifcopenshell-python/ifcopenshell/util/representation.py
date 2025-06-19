@@ -19,9 +19,11 @@
 import numpy as np
 import numpy.typing as npt
 import ifcopenshell
-import ifcopenshell.util.shape
+import ifcopenshell.util.representation
 import ifcopenshell.util.placement
-from typing import Optional, Union, TypedDict, Literal, Generator, Sequence
+import ifcopenshell.util.shape
+from typing import Optional, Union, TypedDict, Literal
+from collections.abc import Generator, Sequence
 
 
 CONTEXT_TYPE = Literal["Model", "Plan", "NotDefined"]

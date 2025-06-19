@@ -26,6 +26,7 @@ from bpy.types import SplineBezierPoints, SplinePoints
 import mathutils
 import xml.etree.ElementTree as ET
 import svgwrite
+import svgwrite.container
 import svgwrite.text
 import ifcopenshell
 import ifcopenshell.util.element
@@ -38,7 +39,8 @@ from bonsai.bim.module.drawing.data import DrawingsData
 from bonsai.bim.module.drawing.data import DecoratorData
 from math import pi, ceil, atan, degrees, acos
 from mathutils import geometry, Vector
-from typing import Optional, Self, Union, Sequence, Callable
+from typing import Optional, Self, Union
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 
@@ -53,7 +55,7 @@ class External(svgwrite.container.Group):
             if elem.tag.startswith(ns):
                 elem.tag = elem.tag[nsl:]
 
-        super(External, self).__init__(**extra)
+        super().__init__(**extra)
 
     def get_xml(self):
         return self.xml

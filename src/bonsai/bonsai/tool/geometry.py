@@ -30,7 +30,9 @@ import ifcopenshell.api
 import ifcopenshell.api.boundary
 import ifcopenshell.api.geometry
 import ifcopenshell.api.grid
+import ifcopenshell.api.group
 import ifcopenshell.api.profile
+import ifcopenshell.api.pset
 import ifcopenshell.api.root
 import ifcopenshell.api.style
 import ifcopenshell.geom
@@ -59,18 +61,15 @@ from mathutils.bvhtree import BVHTree
 from bonsai.bim.ifc import IfcStore
 from typing import (
     Union,
-    Iterable,
     Optional,
     Literal,
-    Iterator,
-    List,
     TYPE_CHECKING,
     get_args,
-    Generator,
     cast,
     TypeGuard,
     Any,
 )
+from collections.abc import Iterable, Iterator, Generator
 from typing_extensions import TypeIs
 
 if TYPE_CHECKING:
@@ -674,7 +673,7 @@ class Geometry(bonsai.core.tool.Geometry):
 
     @classmethod
     def get_representation_data(cls, representation: ifcopenshell.entity_instance) -> Union[bpy.types.Mesh, None]:
-        return bpy.data.meshes.get(cls.get_representation_name(representation))
+        return bpy.data.meshes.get((cls.get_representation_name(representation), None))
 
     @classmethod
     def get_representation_id(cls, representation: ifcopenshell.entity_instance) -> int:
@@ -1471,18 +1470,20 @@ class Geometry(bonsai.core.tool.Geometry):
         ifc_file = tool.Ifc.get()
         # as shape aspect might have multiple representations
         # it's easier to find it from the item
+        representation = None
         for inverse in ifc_file.get_inverse(representation_items[0]):
             if inverse.is_a("IfcShapeRepresentation") and shape_aspect in inverse.OfShapeAspect:
                 representation = inverse
                 break
 
+        assert representation
         # removing last item would make representation invalid
         if len(representation.Items) == len(representation_items):
             # removing last representation would make shape aspect invalid.
             # remove shape aspect first otherwise remove_representation won't remove it because of the inverse
             if len(shape_aspect.ShapeRepresentations) == 1:
                 ifc_file.remove(shape_aspect)
-            tool.Ifc.run("geometry.remove_representation", representation=representation)
+            ifcopenshell.api.geometry.remove_representation(ifc_file, representation=representation)
         else:
             items = set(representation.Items) - set(representation_items)
             representation.Items = tuple(items)
@@ -1927,7 +1928,7 @@ class Geometry(bonsai.core.tool.Geometry):
         return new_item
 
     @classmethod
-    def split_by_loose_parts(cls, obj: bpy.types.Object) -> List[bpy.types.Mesh]:
+    def split_by_loose_parts(cls, obj: bpy.types.Object) -> list[bpy.types.Mesh]:
         # Before .copy() since it also copies the selection.
         selection = tool.Blender.get_objects_selection(bpy.context)
 
@@ -2249,11 +2250,12 @@ class Geometry(bonsai.core.tool.Geometry):
 
     @classmethod
     def remove_linked_aggregate_data(cls, old_to_new):
+        ifc_file = tool.Ifc.get()
         for old, new in old_to_new.items():
             pset = ifcopenshell.util.element.get_pset(new[0], "BBIM_Linked_Aggregate")
             if pset:
                 pset = tool.Ifc.get().by_id(pset["id"])
-                ifcopenshell.api.run("pset.remove_pset", tool.Ifc.get(), product=new[0], pset=pset)
+                ifcopenshell.api.pset.remove_pset(tool.Ifc.get(), product=new[0], pset=pset)
 
             if new[0].is_a("IfcElementAssembly"):
                 linked_aggregate_group = [
@@ -2263,7 +2265,7 @@ class Geometry(bonsai.core.tool.Geometry):
                     if "BBIM_Linked_Aggregate" in r.RelatingGroup.Name
                 ]
                 if linked_aggregate_group:
-                    tool.Ifc.run("group.unassign_group", group=linked_aggregate_group[0], products=[new[0]])
+                    ifcopenshell.api.group.unassign_group(ifc_file, group=linked_aggregate_group[0], products=[new[0]])
 
     @classmethod
     def name_item_object(cls, obj: bpy.types.Object, item: ifcopenshell.entity_instance) -> None:

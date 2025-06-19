@@ -35,8 +35,8 @@ from bpy.props import (
     IntProperty,
     StringProperty,
 )
-from typing import TYPE_CHECKING, Literal, Union, get_args, Generator
-from typing_extensions import assert_never
+from typing import TYPE_CHECKING, Literal, Union, get_args, assert_never
+from collections.abc import Generator
 
 
 def get_export_schema(self: "BIMProjectProperties", context: bpy.types.Context) -> list[tuple[str, str, str]]:
@@ -435,7 +435,7 @@ class BIMProjectProperties(PropertyGroup):
         return new
 
     def get_library_element_index(self, lib_element: LibraryElement) -> int:
-        return next((i for i in range(len(self.library_elements)) if self.library_elements[i] == lib_element))
+        return next(i for i in range(len(self.library_elements)) if self.library_elements[i] == lib_element)
 
     if TYPE_CHECKING:
         is_editing: bool

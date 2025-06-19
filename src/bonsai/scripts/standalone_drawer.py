@@ -3,18 +3,19 @@ import ifcopenshell
 import ifcopenshell.util.element
 import ifcopenshell.geom
 import multiprocessing
-from typing import NamedTuple, List
+from typing import NamedTuple
 
 # python standalone_drawer.py model.ifc guid_of_drawing guids,of,bad,elements output.svg
 
 
 class LineworkContexts(NamedTuple):
-    body: List[List[int]]
-    annotation: List[List[int]]
+    body: list[list[int]]
+    annotation: list[list[int]]
 
 
 class Drawer:
     def execute(self):
+        ifc: ifcopenshell.file
         ifc = ifcopenshell.open(sys.argv[1])
         self.camera_element = ifc.by_guid(sys.argv[2])
         # Don't use draw.main() just whilst we're prototyping and experimenting

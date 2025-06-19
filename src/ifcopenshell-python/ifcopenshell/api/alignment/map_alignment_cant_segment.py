@@ -19,7 +19,7 @@
 import ifcopenshell
 from ifcopenshell import entity_instance
 from ifcopenshell.api.alignment import get_axis_subcontext
-from typing import Sequence
+from collections.abc import Sequence
 import math
 
 
@@ -393,22 +393,22 @@ def map_alignment_cant_segment(
     if not segment.is_a(expected_type):
         raise TypeError(f"Expected to see type '{expected_type}', instead received '{segment.is_a()}'.")
 
-    match segment.DesignParameters.PredefinedType:
-        case "CONSTANTCANT":
-            result = _map_constant_cant(file, segment.DesignParameters, rail_head_distance)
-        case "LINEARTRANSITION":
-            result = _map_linear_transition(file, segment.DesignParameters, rail_head_distance)
-        case "HELMERTCURVE":
-            result = _map_helmert_curve(file, segment.DesignParameters, rail_head_distance)
-        case "BLOSSCURVE":
-            result = _map_bloss_curve(file, segment.DesignParameters, rail_head_distance)
-        case "COSINECURVE":
-            result = _map_cosine_curve(file, segment.DesignParameters, rail_head_distance)
-        case "SINECURVE":
-            result = _map_sine_curve(file, segment.DesignParameters, rail_head_distance)
-        case "VIENNESEBEND":
-            result = _map_viennese_bend(file, segment.DesignParameters, rail_head_distance)
-        case _:
-            raise TypeError("Unexpected predefined type")
+    predefined_type = segment.DesignParameters.PredefinedType
+    if predefined_type == "CONSTANTCANT":
+        result = _map_constant_cant(file, segment.DesignParameters, rail_head_distance)
+    elif predefined_type == "LINEARTRANSITION":
+        result = _map_linear_transition(file, segment.DesignParameters, rail_head_distance)
+    elif predefined_type == "HELMERTCURVE":
+        result = _map_helmert_curve(file, segment.DesignParameters, rail_head_distance)
+    elif predefined_type == "BLOSSCURVE":
+        result = _map_bloss_curve(file, segment.DesignParameters, rail_head_distance)
+    elif predefined_type == "COSINECURVE":
+        result = _map_cosine_curve(file, segment.DesignParameters, rail_head_distance)
+    elif predefined_type == "SINECURVE":
+        result = _map_sine_curve(file, segment.DesignParameters, rail_head_distance)
+    elif predefined_type == "VIENNESEBEND":
+        result = _map_viennese_bend(file, segment.DesignParameters, rail_head_distance)
+    else:
+        raise TypeError(f"Unexpected predefined type: '{predefined_type}'.")
 
     return result

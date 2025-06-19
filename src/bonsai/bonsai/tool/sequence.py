@@ -27,6 +27,7 @@ import mathutils
 import webbrowser
 import isodate
 import ifcopenshell
+import ifcopenshell.api.group
 import ifcopenshell.ifcopenshell_wrapper as W
 import ifcopenshell.util.sequence
 import ifcopenshell.util.date
@@ -38,7 +39,9 @@ import bonsai.bim.helper
 from dateutil import parser
 from datetime import datetime
 from datetime import time as datetime_time
-from typing import Optional, Any, Union, Literal, TYPE_CHECKING, Iterable
+from typing import Optional, Any, Union, Literal, TYPE_CHECKING
+from collections.abc import Iterable
+from mathutils import Color
 
 if TYPE_CHECKING:
     import bonsai.bim.prop
@@ -1449,7 +1452,7 @@ class Sequence(bonsai.core.tool.Sequence):
         obj.keyframe_insert(data_path="color", frame=product_frame["COMPLETED"])
 
     @classmethod
-    def animate_operation(cls, obj, start_frame, product_frame, color):
+    def animate_operation(cls, obj: bpy.types.Object, start_frame: int, product_frame, color: Color) -> None:
         if cls.earliest_frame is None or product_frame["STARTED"] < cls.earliest_frame:
             obj.color = (1.0, 1.0, 1.0, 1)
             obj.keyframe_insert(data_path="color", frame=start_frame)
@@ -1686,12 +1689,13 @@ class Sequence(bonsai.core.tool.Sequence):
     @classmethod
     def save_animation_color_scheme(cls, name: str) -> ifcopenshell.entity_instance:
         props = cls.get_animation_props()
+        ifc_file = tool.Ifc.get()
         colour_scheme = {
             "Inputs": {cs.name: cs.color[0:3] for cs in props.task_input_colors},
             "Outputs": {cs.name: cs.color[0:3] for cs in props.task_output_colors},
         }
 
-        group = [g for g in tool.Ifc.get().by_type("IfcGroup") if g.Name == name]
+        group = [g for g in ifc_file.by_type("IfcGroup") if g.Name == name]
         if group:
             group = group[0]
             description = json.loads(group.Description)
@@ -1699,7 +1703,7 @@ class Sequence(bonsai.core.tool.Sequence):
             group.Description = json.dumps(description)
         else:
             description = json.dumps({"type": "BBIM_AnimationColorScheme", "colourscheme": colour_scheme})
-            group = tool.Ifc.run("group.add_group", name=name, description=description)
+            group = ifcopenshell.api.group.add_group(ifc_file, name=name, description=description)
         return group[0]
 
     @classmethod

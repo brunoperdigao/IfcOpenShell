@@ -18,10 +18,13 @@
 
 import bpy
 import ifcopenshell
+import ifcopenshell.api.owner
 import bonsai.core.tool
 import bonsai.tool as tool
 from test.bim.bootstrap import NewFile
 from bonsai.tool.owner import Owner as subject
+from typing import Any
+from functools import cache
 
 
 class TestImplementsTool(NewFile):
@@ -579,3 +582,56 @@ class TestSetUser(NewFile):
         subject.set_user(user)
         props = subject.get_owner_props()
         assert props.active_user_id == user.id()
+
+
+class TestApplicationUI(NewFile):
+    ifc_class = "IfcApplication"
+    attrs_: dict[str, Any] = {
+        "Version": "v001",
+        "ApplicationFullName": "IfcOpenShell",
+        "ApplicationIdentifier": "IfcOpenShell",
+    }
+
+    @cache
+    def get_attrs(self, ifc_file: ifcopenshell.file) -> dict[str, Any]:
+        attrs = self.attrs_.copy()
+        attrs["ApplicationDeveloper"] = ifc_file.create_entity("IfcOrganization", Name="Test")
+        return attrs
+
+    def test_set(self):
+        application = ifcopenshell.file().create_entity(self.ifc_class)
+        subject.set_application(application)
+        props = subject.get_owner_props()
+        assert props.active_application_id == application.id()
+
+    def test_get(self):
+        ifc = ifcopenshell.file()
+        tool.Ifc.set(ifc)
+        application = ifc.create_entity(self.ifc_class)
+        subject.set_application(application)
+        assert subject.get_application() == application
+
+    def test_run_clear(self):
+        application = ifcopenshell.file().create_entity(self.ifc_class)
+        subject.set_application(application)
+        subject.clear_application()
+        props = subject.get_owner_props()
+        assert props.active_application_id == 0
+
+    def test_import(self):
+        ifc = ifcopenshell.file()
+        tool.Ifc.set(ifc)
+        application = ifc.create_entity(self.ifc_class)
+        for attr, value in self.get_attrs(ifc).items():
+            setattr(application, attr, value)
+        subject.set_application(application)
+        subject.import_application_attributes()
+        props = subject.get_owner_props()
+        for attr, value in self.get_attrs(ifc).items():
+            if isinstance(value, ifcopenshell.entity_instance):
+                value = str(value.id())
+            assert props.application_attributes[attr].get_value() == value
+
+    def test_export(self):
+        self.test_import()
+        assert subject.export_application_attributes() == self.get_attrs(tool.Ifc.get())

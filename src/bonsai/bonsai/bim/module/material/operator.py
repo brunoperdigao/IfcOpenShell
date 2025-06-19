@@ -20,13 +20,12 @@ import bpy
 import json
 import ifcopenshell.api
 import ifcopenshell.api.material
+import ifcopenshell.api.profile
+import ifcopenshell.api.style
 import ifcopenshell.util.element
-import ifcopenshell.util.attribute
 import ifcopenshell.util.representation
-import ifcopenshell.util.unit
 import bonsai.bim.helper
 import bonsai.tool as tool
-import bonsai.core.style
 import bonsai.core.material as core
 import bonsai.bim.module.model.profile as model_profile
 from typing import Any, Union, TYPE_CHECKING
@@ -121,15 +120,14 @@ class AssignParameterizedProfile(bpy.types.Operator, tool.Ifc.Operator):
     def _execute(self, context):
         obj = bpy.data.objects.get(self.obj) if self.obj else context.active_object
         self.file = tool.Ifc.get()
-        profile = ifcopenshell.api.run(
-            "profile.add_parameterized_profile",
+        profile = ifcopenshell.api.profile.add_parameterized_profile(
             self.file,
-            **{"ifc_class": self.ifc_class},
+            ifc_class=self.ifc_class,
         )
-        ifcopenshell.api.run(
-            "material.assign_profile",
+        ifcopenshell.api.material.assign_profile(
             self.file,
-            **{"material_profile": self.file.by_id(self.material_profile), "profile": profile},
+            material_profile=self.file.by_id(self.material_profile),
+            profile=profile,
         )
         bpy.ops.bim.enable_editing_material_set_item(obj=obj.name, material_set_item=self.material_profile)
 
@@ -472,13 +470,10 @@ class RemoveListItem(bpy.types.Operator, tool.Ifc.Operator):
     def _execute(self, context):
         obj = bpy.data.objects.get(self.obj) if self.obj else context.active_object
         self.file = tool.Ifc.get()
-        ifcopenshell.api.run(
-            "material.remove_list_item",
+        ifcopenshell.api.material.remove_list_item(
             self.file,
-            **{
-                "material_list": self.file.by_id(self.list_item_set),
-                "material_index": self.list_item_index,
-            },
+            material_list=self.file.by_id(self.list_item_set),
+            material_index=self.list_item_index,
         )
 
 
@@ -683,7 +678,7 @@ class EditMaterialSetItemProfile(bpy.types.Operator, tool.Ifc.Operator):
         self.props = tool.Material.get_object_material_props(obj)
         attributes = bonsai.bim.helper.export_attributes(self.props.material_set_item_profile_attributes)
         profile = tool.Ifc.get().by_id(self.material_set_item).Profile
-        ifcopenshell.api.run("profile.edit_profile", tool.Ifc.get(), profile=profile, attributes=attributes)
+        ifcopenshell.api.profile.edit_profile(tool.Ifc.get(), profile=profile, attributes=attributes)
         self.props.active_material_set_item_id = 0
         self.props.material_set_item_profile_attributes.clear()
         model_profile.DumbProfileRegenerator().regenerate_from_profile_def(profile)
@@ -900,7 +895,7 @@ class EditMaterialStyle(bpy.types.Operator, tool.Ifc.Operator):
         material = ifc_file.by_id(props.active_material_id)
         style = ifc_file.by_id(int(props.styles))
         context = ifc_file.by_id(int(props.contexts))
-        ifcopenshell.api.run("style.assign_material_style", ifc_file, material=material, style=style, context=context)
+        ifcopenshell.api.style.assign_material_style(ifc_file, material=material, style=style, context=context)
         tool.Material.disable_editing_material()
         core.load_materials(tool.Material, props.material_type)
         # NOTE: Update all elements that has this material and
@@ -923,9 +918,7 @@ class UnassignMaterialStyle(bpy.types.Operator, tool.Ifc.Operator):
         material = tool.Ifc.get().by_id(props.materials[props.active_material_index].ifc_definition_id)
         style = tool.Ifc.get().by_id(self.style)
         context = tool.Ifc.get().by_id(self.context)
-        ifcopenshell.api.run(
-            "style.unassign_material_style", tool.Ifc.get(), material=material, style=style, context=context
-        )
+        ifcopenshell.api.style.unassign_material_style(tool.Ifc.get(), material=material, style=style, context=context)
         core.load_materials(tool.Material, props.material_type)
         tool.Material.update_elements_using_material(material)
 

@@ -22,11 +22,11 @@ import bonsai.core.tool
 import bonsai.tool as tool
 import bonsai.bim.helper
 import ifcopenshell
-from typing import Union, Any, TYPE_CHECKING, Literal
-from typing_extensions import assert_never
+from typing import Union, Any, TYPE_CHECKING, Literal, assert_never
 
 if TYPE_CHECKING:
     from bonsai.bim.module.owner.prop import BIMOwnerProperties
+    from bonsai.bim.prop import Attribute
 
 
 class Owner(bonsai.core.tool.Owner):
@@ -304,3 +304,47 @@ class Owner(bonsai.core.tool.Owner):
     def get_actor(cls) -> ifcopenshell.entity_instance:
         props = cls.get_owner_props()
         return tool.Ifc().get().by_id(props.active_actor_id)
+
+    # Application.
+    @classmethod
+    def get_application(cls) -> ifcopenshell.entity_instance:
+        props = cls.get_owner_props()
+        return tool.Ifc.get().by_id(props.active_application_id)
+
+    @classmethod
+    def set_application(cls, application: ifcopenshell.entity_instance) -> None:
+        props = cls.get_owner_props()
+        props.active_application_id = application.id()
+
+    @classmethod
+    def clear_application(cls) -> None:
+        props = cls.get_owner_props()
+        if "active_application_id" in props:
+            del props["active_application_id"]
+
+    @classmethod
+    def import_application_attributes(cls) -> None:
+        props = cls.get_owner_props()
+        application = tool.Ifc.get().by_id(props.active_application_id)
+        props.application_attributes.clear()
+
+        def callback(name: str, prop: Union[Attribute, None], data: dict[str, Any]):
+            if name == "ApplicationDeveloper":
+                new = props.application_attributes.add()
+                new.name = name
+                new.data_type = "enum"
+                new.is_optional = False
+                new.enum_items_dynamic = "organizations"
+                new.enum_value = str(data["ApplicationDeveloper"].id())
+                return True
+
+        bonsai.bim.helper.import_attributes(
+            "IfcApplication", props.application_attributes, application.get_info(), callback
+        )
+
+    @classmethod
+    def export_application_attributes(cls) -> dict[str, Any]:
+        props = cls.get_owner_props()
+        attributes = bonsai.bim.helper.export_attributes(props.application_attributes)
+        bonsai.bim.helper.process_exported_entity_attribute(attributes, "ApplicationDeveloper")
+        return attributes

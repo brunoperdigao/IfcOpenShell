@@ -24,6 +24,7 @@ import bmesh
 import shapely
 import ifcopenshell
 import ifcopenshell.util.element
+import ifcopenshell.util.representation
 import ifcopenshell.util.unit
 import bonsai.tool as tool
 import bonsai.bim.module.drawing.helper as helper
@@ -37,8 +38,9 @@ from bonsai.bim.module.drawing.data import DecoratorData, DrawingsData
 from bonsai.bim.module.drawing.shaders import add_verts_sequence, add_offsets
 from bonsai.bim.module.drawing.helper import format_distance
 from timeit import default_timer as timer
-from functools import lru_cache
-from typing import Optional, Iterator, Type, Union
+from functools import cache
+from typing import Optional, Union
+from collections.abc import Iterator
 
 UNSPECIAL_ELEMENT_COLOR = (0.2, 0.2, 0.2, 1)  # GREY
 
@@ -495,7 +497,7 @@ class BaseDecorator:
 
         self.draw_label(context, text=text, line_no=line_number_start, multiline=True, **draw_label_kwargs)
 
-    @lru_cache(maxsize=None)
+    @cache
     def format_value(self, context, value, custom_unit=None):
         drawing_pset_data = DrawingsData.data["active_drawing_pset_data"]
         precision = drawing_pset_data.get("MetricPrecision", None)
@@ -1698,11 +1700,12 @@ class CutDecorator:
         self.shader.bind()
 
         black = (0, 0, 0, 1)
-
-        for colour, element_fills in fills.items():
-            for verts_tris in element_fills:
-                for verts, tris in verts_tris:
-                    self.draw_batch("TRIS", verts, colour, tris)
+        model_props = tool.Model.get_model_props()
+        if model_props.show_cut_decorator_fill:
+            for colour, element_fills in fills.items():
+                for verts_tris in element_fills:
+                    for verts, tris in verts_tris:
+                        self.draw_batch("TRIS", verts, colour, tris)
 
         gpu.state.point_size_set(2)
         self.line_shader.uniform_float("lineWidth", 3.0)
@@ -1895,7 +1898,7 @@ class CutDecorator:
 
 
 class DecorationsHandler:
-    decorators_classes: list[Type[BaseDecorator]] = [
+    decorators_classes: list[type[BaseDecorator]] = [
         DimensionDecorator,
         AngleDecorator,
         GridDecorator,

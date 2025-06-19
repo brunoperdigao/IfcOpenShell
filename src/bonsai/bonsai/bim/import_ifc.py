@@ -38,7 +38,8 @@ import ifcopenshell.util.shape
 import bonsai.tool as tool
 from bonsai.bim.ifc import IfcStore, IFC_CONNECTED_TYPE
 from bonsai.tool.loader import OBJECT_DATA_TYPE
-from typing import Dict, Union, Optional, Any, Literal, Iterable
+from typing import Union, Optional, Any, Literal
+from collections.abc import Iterable
 from ifcopenshell.util.shape import MatrixType
 
 
@@ -47,7 +48,7 @@ class MaterialCreator:
     obj: bpy.types.Object
 
     def __init__(self, ifc_import_settings: IfcImportSettings, ifc_importer: IfcImporter):
-        self.styles: Dict[int, bpy.types.Material] = {}
+        self.styles: dict[int, bpy.types.Material] = {}
         self.parsed_meshes: set[str] = set()
         self.ifc_import_settings = ifc_import_settings
         self.ifc_importer = ifc_importer
@@ -856,7 +857,7 @@ class IfcImporter:
         return obj
 
     def load_existing_meshes(self) -> None:
-        self.meshes.update({m.name: m for m in bpy.data.meshes})
+        self.meshes.update({m.name: m for m in bpy.data.meshes if m.library is None})
 
     def merge_materials_by_colour(self):
         cleaned_materials = {}
@@ -1033,7 +1034,7 @@ class IfcImporter:
         element: ifcopenshell.entity_instance,
         shape: Union[ifcopenshell.geom.ShapeElementType, ifcopenshell.geom.ShapeType],
     ) -> bpy.types.Curve:
-        if hasattr(shape, "geometry"):
+        if isinstance(shape, ifcopenshell.geom.ShapeElementType):
             geometry = shape.geometry
         else:
             geometry = shape
@@ -1066,7 +1067,7 @@ class IfcImporter:
         cartesian_point_offset: Union[npt.NDArray[np.float64], Literal[False]] = None,
     ) -> Union[bpy.types.Mesh, None]:
         try:
-            if hasattr(shape, "geometry"):
+            if isinstance(shape, ifcopenshell.geom.ShapeElementType):
                 # shape is ShapeElementType
                 geometry = shape.geometry
             else:
@@ -1075,7 +1076,7 @@ class IfcImporter:
             # Mesh may already exists (e.g. during representation reimport)
             # and we assign some suffix to it to prevent Blender from adding '.001' suffix to the new mesh.
             mesh_name = tool.Loader.get_mesh_name_from_shape(geometry)
-            if old_mesh := bpy.data.meshes.get(mesh_name):
+            if old_mesh := bpy.data.meshes.get((mesh_name, None)):
                 old_mesh.name = mesh_name + ".old"
             mesh = bpy.data.meshes.new(mesh_name)
 

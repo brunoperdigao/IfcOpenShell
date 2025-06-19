@@ -27,7 +27,8 @@ import ifcopenshell.util.element
 import ifcopenshell.util.unit
 from ifcopenshell.util.doc import get_attribute_doc, get_predefined_type_doc, get_property_doc
 import bonsai.tool as tool
-from typing import Optional, Callable, Any, Union, Iterable, TYPE_CHECKING
+from typing import Optional, Any, Union, TYPE_CHECKING
+from collections.abc import Callable, Iterable
 
 if TYPE_CHECKING:
     import bonsai.bim.prop
@@ -120,7 +121,8 @@ def import_attributes(
     callback: Optional[ImportCallback] = None,
 ) -> None:
     schema = tool.Ifc.schema()
-    for attribute in schema.declaration_by_name(ifc_class).all_attributes():
+    assert (entity := schema.declaration_by_name(ifc_class).as_entity())
+    for attribute in entity.all_attributes():
         import_attribute(attribute, props, data, callback=callback)
 
 
@@ -131,11 +133,13 @@ def import_attributes2(
     callback: Optional[ImportCallback] = None,
 ) -> None:
     if isinstance(element, str):
-        attributes = tool.Ifc.schema().declaration_by_name(element).as_entity().all_attributes()
+        assert (entity := tool.Ifc.schema().declaration_by_name(element).as_entity())
+        attributes = entity.all_attributes()
         info = {a.name(): None for a in attributes}
         info["type"] = element
     else:
-        attributes = element.wrapped_data.declaration().as_entity().all_attributes()
+        assert (entity := element.wrapped_data.declaration().as_entity())
+        attributes = entity.all_attributes()
         info = element.get_info()
     for attribute in attributes:
         import_attribute(attribute, props, info, callback=callback)
@@ -267,6 +271,15 @@ def export_attributes(
             continue  # Our job is done
         attributes[prop.name] = prop.get_value()
     return attributes
+
+
+def process_exported_entity_attribute(attributes: dict[str, Any], attribute_name: str) -> None:
+    entity_id = attributes[attribute_name]
+    if entity_id is None:
+        # Maybe it was removed by now and enum is invalid.
+        del attributes[attribute_name]
+    else:
+        attributes[attribute_name] = tool.Ifc.get().by_id(int(entity_id))
 
 
 ENUM_ITEMS_DATA = Union[bpy.types.PropertyGroup, bpy.types.ID, bpy.types.Operator, bpy.types.OperatorProperties]
@@ -411,7 +424,12 @@ def draw_filter(
         if data.data["saved_searches"]:
             row.operator("bim.load_search", text="", icon="IMPORT").module = module
         row.operator("bim.save_search", text="", icon="EXPORT").module = module
-
+        if module != "search":
+            if module == "drawing_include":
+                row.operator("bim.edit_element_filter", icon="CHECKMARK", text="").filter_mode = "INCLUDE"
+            if module == "drawing_exclude":
+                row.operator("bim.edit_element_filter", icon="CHECKMARK", text="").filter_mode = "EXCLUDE"
+            row.operator("bim.enable_editing_element_filter", icon="CANCEL", text="").filter_mode = "NONE"
     row = layout.row(align=True)
     row.operator("bim.add_filter_group", text="Add Search Group", icon="ADD").module = module
     row.operator("bim.edit_filter_query", text="", icon="FILTER").module = module

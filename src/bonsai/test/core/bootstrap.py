@@ -20,8 +20,7 @@ import sys
 import json
 import pytest
 import bonsai.core.tool
-from typing import Any, Optional, Type, Union, TypedDict, Literal
-from typing_extensions import Self
+from typing import Any, Optional, TypedDict, Literal, Self
 
 
 @pytest.fixture
@@ -249,8 +248,16 @@ def flatten(iterable):
             yield item
 
 
-Call = TypedDict("Call", {"name": str, "args": tuple[Any, ...], "kwargs": dict[str, Any]})
-Prediction = TypedDict("Prediction", {"type": Literal["SHOULD_BE_CALLED"], "number": Optional[int], "call": Call})
+class Call(TypedDict):
+    name: str
+    args: tuple[Any, ...]
+    kwargs: dict[str, Any]
+
+
+class Prediction(TypedDict):
+    type: Literal["SHOULD_BE_CALLED"]
+    number: Optional[int]
+    call: Call
 
 
 class Prophecy:
@@ -269,9 +276,9 @@ class Prophecy:
     - Ensure all predicted calls actually happened.
     """
 
-    subject: Type
+    subject: type
 
-    def __init__(self, cls: Type):
+    def __init__(self, cls: type):
         self.subject = cls
         self.predictions: list[Prediction] = []
         self.calls: list[Call] = []

@@ -19,11 +19,12 @@
 import bpy
 import bonsai.tool as tool
 import bonsai.core.owner as core
+import ifcopenshell.api.owner
 from ifcopenshell.api.owner.add_address import ADDRESS_TYPE
 from typing import TYPE_CHECKING, get_args
 
 if TYPE_CHECKING:
-    import bpy._typing.rna_enums as rna_enums
+    import bpy.stub_internal.rna_enums as rna_enums
 
 
 class EnableEditingPerson(bpy.types.Operator):
@@ -468,3 +469,98 @@ class UnassignActor(bpy.types.Operator, tool.Ifc.Operator):
         assert (obj := context.active_object)
         assert (element := tool.Ifc.get_entity(obj))
         core.unassign_actor(tool.Ifc, actor=tool.Ifc.get().by_id(self.actor), element=element)
+
+
+class RemoveApplication(bpy.types.Operator, tool.Ifc.Operator):
+    bl_idname = "bim.remove_application"
+    bl_label = "Remove Application"
+    bl_options = {"REGISTER", "UNDO"}
+    bl_description = (
+        "Remove provided IfcApplication."
+        "\n\nFor safety will only work on applications without inverses (they are typically marked as '(unused)'."
+    )
+    application_id: bpy.props.IntProperty()  # pyright: ignore[reportRedeclaration]
+
+    if TYPE_CHECKING:
+        application_id: int
+
+    @classmethod
+    def description(cls, context, properties) -> str:
+        description = cls.bl_description
+        application_id: int
+        if not (application_id := properties.application_id):
+            return description
+        ifc_file = tool.Ifc.get()
+        application = ifc_file.by_id(application_id)
+
+        application_info = "Additional application info:"
+        application_info += f"\n- Developer: {application.ApplicationDeveloper.Name}"
+        application_info += f"\n- Version: {application.Version}"
+        application_info += f"\n- Identifier: {application.ApplicationIdentifier}"
+        application_info += f"\n- Number of inverses: {ifc_file.get_total_inverses(application)}"
+        application_info += f"\n(try to remove application to see the full list of inverses in system console)"
+
+        description += f"\n\n{application_info}"
+        return description
+
+    def invoke(self, context, event):
+        ifc_file = tool.Ifc.get()
+        assert (application := ifc_file.by_id(self.application_id))
+        if total_inverses := ifc_file.get_total_inverses(application):
+            print(f"Present inverses for {application}:")
+            for inverse in ifc_file.get_inverse(application):
+                print(f"- {inverse}")
+            self.report(
+                {"ERROR"},
+                f"This IfcApplication still has {total_inverses} inverses, deletion is unsafe. "
+                "Check system console for the details.",
+            )
+            return {"CANCELLED"}
+        return self.execute(context)
+
+    def _execute(self, context):
+        ifc_file = tool.Ifc.get()
+        ifcopenshell.api.owner.remove_application(ifc_file, ifc_file.by_id(self.application_id))
+
+
+class EnableEditingApplication(bpy.types.Operator):
+    bl_idname = "bim.enable_editing_application"
+    bl_label = "Enable Editing Application"
+    bl_options = {"REGISTER", "UNDO"}
+    application_id: bpy.props.IntProperty()  # pyright: ignore[reportRedeclaration]
+
+    if TYPE_CHECKING:
+        application_id: int
+
+    def execute(self, context) -> "set[rna_enums.OperatorReturnItems]":
+        core.enable_editing_application(tool.Owner, tool.Ifc.get().by_id(self.application_id))
+        return {"FINISHED"}
+
+
+class DisableEditingApplication(bpy.types.Operator):
+    bl_idname = "bim.disable_editing_application"
+    bl_label = "Disable Editing Application"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context) -> "set[rna_enums.OperatorReturnItems]":
+        core.disable_editing_application(tool.Owner)
+        return {"FINISHED"}
+
+
+class EditApplication(bpy.types.Operator, tool.Ifc.Operator):
+    bl_idname = "bim.edit_application"
+    bl_label = "Edit Application"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def _execute(self, context) -> "set[rna_enums.OperatorReturnItems]":
+        core.edit_application(tool.Ifc, tool.Owner)
+        return {"FINISHED"}
+
+
+class AddApplication(bpy.types.Operator, tool.Ifc.Operator):
+    bl_idname = "bim.add_application"
+    bl_label = "Add Application"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def _execute(self, context) -> None:
+        core.add_application(tool.Ifc, tool.Owner)

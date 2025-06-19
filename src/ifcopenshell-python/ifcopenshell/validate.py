@@ -50,8 +50,14 @@ import types
 import argparse
 
 from collections import namedtuple
-from typing import Union, Iterator, Any, Optional
+from typing import Union, Any, Optional
+from collections.abc import Iterator
 from logging import Logger, Handler
+
+if sys.version_info >= (3, 10):
+    from types import EllipsisType
+else:
+    EllipsisType = type(...)
 
 import ifcopenshell
 import ifcopenshell.simple_spf
@@ -75,7 +81,7 @@ attribute_types = Union[simple_type, named_type, enumeration_type, select_type, 
 
 class ValidationError(Exception):
     def __init__(self, message, attribute=None):
-        super(ValidationError, self).__init__(message)
+        super().__init__(message)
         self.attribute = attribute
 
 
@@ -439,7 +445,7 @@ def validate(f: Union[ifcopenshell.file, str], logger: Logger, express_rules=Fal
         if hasattr(logger, "set_state"):
             logger.set_state("instance", inst)
 
-        guid: Union[str, None, types.EllipsisType]
+        guid: Union[str, None, EllipsisType]
         if (guid := getattr(inst, "GlobalId", ...)) is not ...:
             if guid is not None and guid in used_guids:
                 rule = "Rule IfcRoot.UR1:\n    The attribute GlobalId should be unique"

@@ -4,9 +4,6 @@ on:
   push:
   pull_request:
 
-env:
-  PYTHON_VERSION: "3.12"
-
 jobs:
   lint-formatting:
     runs-on: ubuntu-latest
@@ -17,27 +14,39 @@ jobs:
       - name: Action - install python
         uses: actions/setup-python@v5.3.0
         with:
-          python-version: "${{ env.PYTHON_VERSION }}"
+          python-version: "3.9"
+
+      - name: Action - install python
+        uses: actions/setup-python@v5.3.0
+        with:
+          python-version: "3.11"
 
       - name: Install dependencies
         run: |
-          python3 -m pip install --upgrade pip
-          python3 -m pip install 'black>=24.10.0'
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          uv tool install ruff
+          uv tool install black
 
       # black doesn't catch all syntax errors, so we check them explicitly.
       - name: Check syntax errors
         id: syntax-errors
         run: |
           ERROR=0
-          python3 -W error -m compileall -q src/ifcopenshell-python || ERROR=1
-          python3 -W error -m compileall -q src/bonsai || ERROR=1
+          python3.9 -W error -m compileall -q src/ifcopenshell-python || ERROR=1
+          python3.11 -W error -m compileall -q src/bonsai || ERROR=1
           exit $ERROR
         continue-on-error: true
 
       - name: Black formatter
-        id: linting
+        id: black
         run: |
-          python3 -m black --diff --check .
+          uvx black --diff --check .
+        continue-on-error: true
+
+      - name: Ruff check
+        id: ruff
+        run: |
+          uvx ruff check
         continue-on-error: true
 
       - name: Final check
@@ -46,7 +55,10 @@ jobs:
           if [ "${{ steps.syntax-errors.outcome }}" != "success" ]; then
             echo "::error::Syntax errors check failed, see 'syntax-errors' step for the details." && ERROR=1
           fi
-          if [ "${{ steps.linting.outcome }}" != "success" ]; then
-            echo "::error::Black formatting check failed, see 'linting' step for the details." && ERROR=1
+          if [ "${{ steps.black.outcome }}" != "success" ]; then
+            echo "::error::Black formatting check failed, see 'black' step for the details." && ERROR=1
+          fi
+          if [ "${{ steps.ruff.outcome }}" != "success" ]; then
+            echo "::error::Ruff check failed, see 'ruff' step for the details." && ERROR=1
           fi
           exit $ERROR

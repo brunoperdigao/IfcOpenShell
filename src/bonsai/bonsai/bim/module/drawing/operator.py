@@ -24,6 +24,7 @@ import bmesh
 import shutil
 import hashlib
 import shapely
+import shapely.ops
 import subprocess
 import numpy as np
 import multiprocessing
@@ -34,9 +35,10 @@ import ifcopenshell.api.pset
 import ifcopenshell.api.style
 import ifcopenshell.ifcopenshell_wrapper
 import ifcopenshell.geom
-import ifcopenshell.util.selector
-import ifcopenshell.util.representation
 import ifcopenshell.util.element
+import ifcopenshell.util.representation
+import ifcopenshell.util.selector
+import ifcopenshell.util.unit
 import bonsai.bim.helper
 import bonsai.bim.handler
 import bonsai.tool as tool
@@ -49,7 +51,7 @@ import bonsai.bim.export_ifc
 from bpy_extras.io_utils import ImportHelper
 from bonsai.bim.module.drawing.decoration import CutDecorator
 from bonsai.bim.module.drawing.data import DecoratorData
-from typing import NamedTuple, List, Union, Optional, Literal, TYPE_CHECKING, Any, TypedDict
+from typing import NamedTuple, Union, Optional, Literal, TYPE_CHECKING, Any, TypedDict
 from lxml import etree
 from math import radians
 from mathutils import Vector, Color, Matrix
@@ -62,7 +64,7 @@ from bpy_extras.image_utils import load_image
 if TYPE_CHECKING:
     from bonsai.bim.module.drawing.prop import RenderType
     from bonsai.bim.module.project.prop import Link
-    from bpy._typing import rna_enums
+    from bpy.stub_internal import rna_enums
 
 cwd = os.path.dirname(os.path.realpath(__file__))
 
@@ -83,8 +85,8 @@ class profile:
 
 
 class LineworkContexts(NamedTuple):
-    body: List[List[int]]
-    annotation: List[List[int]]
+    body: list[list[int]]
+    annotation: list[list[int]]
 
 
 class AddAnnotationType(bpy.types.Operator, tool.Ifc.Operator):
@@ -1060,7 +1062,7 @@ class CreateDrawing(bpy.types.Operator):
                     # file 2 only has the groups we are interested in.
                     # in fact in the approach, it's only a single group
 
-                    g2 = list(yield_groups(svg2))[0]
+                    g2 = next(yield_groups(svg2))
 
                     # Loop over the cell paths
                     for pi, p in enumerate(g2.getElementsByTagName("path")):
@@ -2112,8 +2114,9 @@ class ActivateModel(bpy.types.Operator):
     def execute(self, context):
         dprops = tool.Drawing.get_document_props()
         dprops.active_drawing_id = 0
-
-        CutDecorator.uninstall()
+        model_props = tool.Model.get_model_props()
+        if model_props.show_cut_decorator:
+            CutDecorator.uninstall()
 
         # Preserve current visibility statuses for:
         # - non-ifc objects
@@ -2206,7 +2209,9 @@ class ActivateDrawingBase(tool.Ifc.Operator):
 
         if tool.Drawing.is_camera_orthographic():
             core.sync_references(tool.Ifc, tool.Collector, tool.Drawing, drawing=tool.Ifc.get().by_id(self.drawing))
-        CutDecorator.install(context)
+        model_props = tool.Model.get_model_props()
+        if model_props.show_cut_decorator:
+            CutDecorator.install(context)
         tool.Drawing.show_decorations()
 
         # Save drawing bounds to the .ifc file
@@ -3470,11 +3475,15 @@ class SelectAssignedProduct(bpy.types.Operator, tool.Ifc.Operator):
 
 class EnableEditingElementFilter(bpy.types.Operator, tool.Ifc.Operator):
     bl_idname = "bim.enable_editing_element_filter"
-    bl_label = "Enable Editing Element Filter"
-    bl_description = "Enable editing options for the include or exclude filter"
-
+    bl_label = "Element Filter Mode"
     bl_options = {"REGISTER", "UNDO"}
     filter_mode: bpy.props.StringProperty()
+
+    @classmethod
+    def description(cls, context, properties):
+        if properties.filter_mode == "NONE":
+            return "Cancel filter"
+        return "Enable editing options for the include or exclude filter"
 
     def _execute(self, context):
         assert context.scene
@@ -3497,6 +3506,7 @@ class EnableEditingElementFilter(bpy.types.Operator, tool.Ifc.Operator):
 class EditElementFilter(bpy.types.Operator, tool.Ifc.Operator):
     bl_idname = "bim.edit_element_filter"
     bl_label = "Edit Element Filter"
+    bl_description = "Saves the filter"
     bl_options = {"REGISTER", "UNDO"}
     filter_mode: bpy.props.StringProperty()
 

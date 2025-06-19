@@ -22,6 +22,8 @@ import bmesh
 import shapely
 import shapely.ops
 import ifcopenshell
+import ifcopenshell.api.attribute
+import ifcopenshell.api.type
 import ifcopenshell.geom
 import ifcopenshell.util.element
 import ifcopenshell.util.placement
@@ -42,7 +44,8 @@ import numpy as np
 from math import pi
 from mathutils import Vector, Matrix
 from shapely import Polygon
-from typing import Generator, Optional, Union, Literal, List, Any, Iterable, TYPE_CHECKING
+from typing import Optional, Union, Literal, Any, TYPE_CHECKING
+from collections.abc import Generator, Iterable
 from collections import defaultdict
 from natsort import natsorted
 
@@ -475,7 +478,7 @@ class Spatial(bonsai.core.tool.Spatial):
         props.containers.clear()
         cls.contracted_containers = json.loads(props.contracted_containers)
         cls.import_spatial_element(tool.Ifc.get().by_type("IfcProject")[0], 0)
-        props.active_container_index = min(previous_container_index, len(props.containers) - 1)
+        props.active_container_index = tool.Blender.get_valid_uilist_index(previous_container_index, props.containers)
 
     @classmethod
     def import_spatial_element(cls, element: ifcopenshell.entity_instance, level_index: int) -> None:
@@ -551,7 +554,7 @@ class Spatial(bonsai.core.tool.Spatial):
 
     @classmethod
     def edit_container_name(cls, container: ifcopenshell.entity_instance, name: str) -> None:
-        tool.Ifc.run("attribute.edit_attributes", product=container, attributes={"Name": name})
+        ifcopenshell.api.attribute.edit_attributes(tool.Ifc.get(), product=container, attributes={"Name": name})
 
     @classmethod
     def get_active_container(cls) -> Union[ifcopenshell.entity_instance, None]:
@@ -957,7 +960,7 @@ class Spatial(bonsai.core.tool.Spatial):
         converted_tolerance = cls.get_converted_tolerance(tolerance_si=0.03)
         poly = poly.buffer(
             converted_tolerance,
-#            single_sided=True,
+            #            single_sided=True,
             cap_style=shapely.BufferCapStyle.flat,
             join_style=shapely.BufferJoinStyle.mitre,
         )
@@ -977,8 +980,9 @@ class Spatial(bonsai.core.tool.Spatial):
         mat_invert = mat.inverted()
         si_conversion = 1.0 if polygon_is_si else ifcopenshell.util.unit.calculate_unit_scale(tool.Ifc.get())
         new_verts = [
-            #bm.verts.new(mat_invert @ (Vector([v[0], v[1], 0]) * si_conversion)) for v in poly.exterior.coords[0:-1]
-            bm.verts.new(mat_invert @ (Vector([v[0], v[1], 0]) * si_conversion)) for v in shapely.get_exterior_ring(poly).coords[0:-1]
+            # bm.verts.new(mat_invert @ (Vector([v[0], v[1], 0]) * si_conversion)) for v in poly.exterior.coords[0:-1]
+            bm.verts.new(mat_invert @ (Vector([v[0], v[1], 0]) * si_conversion))
+            for v in shapely.get_exterior_ring(poly).coords[0:-1]
         ]
         [bm.edges.new((new_verts[i], new_verts[i + 1])) for i in range(len(new_verts) - 1)]
         bm.edges.new((new_verts[len(new_verts) - 1], new_verts[0]))
@@ -1165,13 +1169,15 @@ class Spatial(bonsai.core.tool.Spatial):
     @classmethod
     def assign_type_to_obj(cls, obj: bpy.types.Object) -> None:
         props = tool.Model.get_model_props()
+        ifc_file = tool.Ifc.get()
         relating_type_id = props.relating_type_id
         relating_type = tool.Ifc.get().by_id(int(relating_type_id))
         ifc_class = relating_type.is_a()
-        instance_class = ifcopenshell.util.type.get_applicable_entities(ifc_class, tool.Ifc.get().schema)[0]
+        instance_class = ifcopenshell.util.type.get_applicable_entities(ifc_class, ifc_file.schema)[0]
         bpy.ops.bim.assign_class(obj=obj.name, ifc_class=instance_class)
         element = tool.Ifc.get_entity(obj)
-        tool.Ifc.run("type.assign_type", related_objects=[element], relating_type=relating_type)
+        assert element
+        ifcopenshell.api.type.assign_type(ifc_file, related_objects=[element], relating_type=relating_type)
 
     @classmethod
     def assign_relating_type_to_element(
@@ -1266,7 +1272,7 @@ class Spatial(bonsai.core.tool.Spatial):
         return None
 
     @classmethod
-    def get_selected_containers(cls) -> List[ifcopenshell.entity_instance]:
+    def get_selected_containers(cls) -> list[ifcopenshell.entity_instance]:
         results = []
         for obj in tool.Blender.get_selected_objects():
             if (element := tool.Ifc.get_entity(obj)) and tool.Root.is_spatial_element(element):

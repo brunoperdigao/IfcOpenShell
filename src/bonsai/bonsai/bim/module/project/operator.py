@@ -174,6 +174,7 @@ class SelectLibraryFile(bpy.types.Operator, IFCFileSelector, ImportHelper):
     def _execute(self, context):
         filepath = self.get_filepath()
         ifc_file = tool.Ifc.get()
+        library_file: ifcopenshell.file
         library_file = ifcopenshell.open(filepath)
         if library_file.schema_identifier != ifc_file.schema_identifier:
             self.report(
@@ -319,7 +320,7 @@ class ChangeLibraryElement(bpy.types.Operator):
             for element in elements:
                 ifc_classes_elements[element.is_a()].append(element)
 
-            if len(ifc_classes_elements) == 1 and list(ifc_classes_elements)[0] == self.element_name:
+            if len(ifc_classes_elements) == 1 and next(iter(ifc_classes_elements)) == self.element_name:
                 for name, ifc_definition_id in sorted(
                     [(self.get_name(e), e.id()) for e in ifc_classes_elements[self.element_name]]
                 ):
@@ -1538,7 +1539,8 @@ class ExportIFC(bpy.types.Operator, ExportHelper):
     bl_description = "Save active IFC file by the provided filepath."
     bl_options = {"REGISTER", "UNDO"}
     filename_ext = ".ifc"
-    filter_glob: bpy.props.StringProperty(default="*.ifc;*.ifczip;*.ifcxml;*.ifcjson", options={"HIDDEN"})
+    supported_filexts = (".ifc", ".ifczip", ".ifcjson")
+    filter_glob: bpy.props.StringProperty(default=";".join(f"*{ext}" for ext in supported_filexts), options={"HIDDEN"})
     json_version: bpy.props.EnumProperty(items=[("4", "4", ""), ("5a", "5a", "")], name="IFC JSON Version")
     json_compact: bpy.props.BoolProperty(name="Export Compact IFCJSON", default=False)
     should_save_as: bpy.props.BoolProperty(name="Should Save As", default=False, options={"HIDDEN"})
@@ -1557,7 +1559,7 @@ class ExportIFC(bpy.types.Operator, ExportHelper):
 
         layout.separator()
         layout.label(text="Supported formats for export:")
-        layout.label(text=".ifc, .ifczip, .ifcjson")
+        layout.label(text=",".join(self.supported_filexts))
 
     def invoke(self, context, event):
         if not tool.Ifc.get():
@@ -1571,6 +1573,14 @@ class ExportIFC(bpy.types.Operator, ExportHelper):
             return self.execute(context)
 
         return ExportHelper.invoke(self, context, event)
+
+    def check(self, context):
+        # ExportHelper is automatically adjusting suffix to `filename_ext`.
+        filepath = Path(self.filepath)
+        suffix = filepath.suffix.lower()
+        if suffix != self.filename_ext and suffix in self.supported_filexts:
+            self.filename_ext = suffix
+        return ExportHelper.check(self, context)
 
     def execute(self, context):
         project_props = tool.Project.get_project_props()
@@ -2149,8 +2159,7 @@ class AppendInspectedLinkedElement(AppendLibraryElement):
             return {"CANCELLED"}
 
         element_to_append = linked_ifc_file.by_guid(guid)
-        element = ifcopenshell.api.run(
-            "project.append_asset",
+        element = ifcopenshell.api.project.append_asset(
             tool.Ifc.get(),
             library=linked_ifc_file,
             element=element_to_append,

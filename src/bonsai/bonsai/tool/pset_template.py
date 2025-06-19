@@ -24,9 +24,9 @@ import ifcopenshell.util.attribute
 import ifcopenshell.util.element
 import bonsai.core.tool
 import bonsai.tool as tool
+import bonsai.bim
 from pathlib import Path
-from typing import Union, Literal, Any, final
-from typing_extensions import assert_never, TYPE_CHECKING
+from typing import Literal, final, TYPE_CHECKING
 from bonsai.bim.ifc import IfcStore
 
 if TYPE_CHECKING:
@@ -124,7 +124,7 @@ class PsetTemplate(bonsai.core.tool.PsetTemplate):
     PSET_TEMPLATE_LOCATION = Literal["Global Pset Template", "Project Pset Template"]
 
     @classmethod
-    def get_pset_template_files(cls) -> list[tuple[Path, "PSET_TEMPLATE_LOCATION"]]:
+    def get_pset_template_files(cls) -> list[tuple[Path, PSET_TEMPLATE_LOCATION]]:
         """
         :return: List of pset template files. Each template file is represented
             by a tuple of the filepath and pset template location source.

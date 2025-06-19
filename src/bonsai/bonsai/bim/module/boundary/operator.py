@@ -404,12 +404,13 @@ class EditBoundaryAttributes(bpy.types.Operator, tool.Ifc.Operator):
         assert obj
         bprops = tool.Boundary.get_object_boundary_props(obj)
         boundary = tool.Ifc.get_entity(obj)
+        assert boundary
         attributes = dict()
         for ifc_attribute, blender_property in EDITABLE_ATTRIBUTES.items():
             obj = getattr(bprops, blender_property, None)
             entity = tool.Ifc.get_entity(obj)
             attributes[blender_property] = entity
-        ifcopenshell.api.run("boundary.edit_attributes", tool.Ifc.get(), entity=boundary, **attributes)
+        ifcopenshell.api.boundary.edit_attributes(tool.Ifc.get(), entity=boundary, **attributes)
         bpy.ops.bim.disable_editing_boundary()
         return {"FINISHED"}
 
@@ -983,7 +984,7 @@ class AddBoundary(bpy.types.Operator, tool.Ifc.Operator):
                 continue
 
             connection_geometry = self.create_connection_geometry_from_polygon(opening_polygon, target_face_matrix)
-            boundary = tool.Ifc.run("root.create_entity", ifc_class=props.boundary_class)
+            boundary = ifcopenshell.api.root.create_entity(ifc_file, ifc_class=props.boundary_class)
             boundary.RelatingSpace = space
             boundary.RelatedBuildingElement = filling
             boundary.ConnectionGeometry = connection_geometry

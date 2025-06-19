@@ -18,12 +18,8 @@
 
 from fractions import Fraction
 from math import pi
-from typing import Any
-from typing import Dict
-from typing import Literal
-from typing import Optional
-from typing import Union
-from typing import Generator
+from typing import Literal, Optional, Union
+from collections.abc import Generator
 
 import ifcopenshell
 import ifcopenshell.ifcopenshell_wrapper as ifcopenshell_wrapper
@@ -506,7 +502,7 @@ def get_property_unit(
 
 def get_property_table_unit(
     prop: ifcopenshell.entity_instance, ifc_file: Union[ifcopenshell.file, None], use_cache: bool = False
-) -> Dict[str, Union[ifcopenshell.entity_instance, None]]:
+) -> dict[str, Union[ifcopenshell.entity_instance, None]]:
     """
     Gets the unit definition of a property table
 
@@ -819,12 +815,13 @@ def iter_element_and_attributes_per_type(ifc_file: ifcopenshell.file, attr_type_
     None,
     None,
 ]:
-    schema: ifcopenshell_wrapper.schema_definition = ifcopenshell_wrapper.schema_by_name(ifc_file.schema_identifier)
+    schema = ifcopenshell_wrapper.schema_by_name(ifc_file.schema_identifier)
 
     for element in ifc_file:
-        entity = schema.declaration_by_name(element.is_a())
+        entity = schema.declaration_by_name(element.is_a()).as_entity()
+        assert entity
         attrs = entity.all_attributes()
-        attrs_derived: tuple[bool, ...] = entity.derived()
+        attrs_derived = entity.derived()
         for attr, val, is_derived in zip(attrs, list(element), attrs_derived):
             if is_derived:
                 continue

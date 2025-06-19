@@ -20,12 +20,11 @@
 
 import bpy
 import textwrap
-import ifcopenshell.api
+import ifcopenshell.api.nest
 import bonsai.tool as tool
 from bpy_extras.io_utils import ImportHelper, ExportHelper
 import bonsai.tool as tool
 import bonsai.core.cost as core
-from pathlib import Path
 from typing import get_args, TYPE_CHECKING, Literal
 
 
@@ -46,6 +45,7 @@ class AddCostSchedule(bpy.types.Operator, tool.Ifc.Operator):
 
     def draw(self, context):
         layout = self.layout
+        assert layout
         props = tool.Cost.get_cost_props()
         layout.prop(self, "name", text="Name")
         layout.prop(props, "cost_schedule_predefined_types", text="Type")
@@ -149,8 +149,11 @@ class ExpandCostItem(bpy.types.Operator, tool.Ifc.Operator):
     bl_description = "Expand this cost item"
     cost_item: bpy.props.IntProperty()
 
+    if TYPE_CHECKING:
+        cost_item: int
+
     def _execute(self, context):
-        core.expand_cost_item(tool.Cost, cost_item=tool.Ifc.get().by_id(self.cost_item))
+        core.expand_cost_item(tool.Cost, cost_item_id=self.cost_item)
 
 
 class ExpandCostItems(bpy.types.Operator, tool.Ifc.Operator):
@@ -158,7 +161,6 @@ class ExpandCostItems(bpy.types.Operator, tool.Ifc.Operator):
     bl_label = "Expand Cost Items"
     bl_options = {"REGISTER", "UNDO"}
     bl_description = "Expand all cost items"
-    cost_items: bpy.props.StringProperty()
 
     def _execute(self, context):
         core.expand_cost_items(tool.Cost)
@@ -171,8 +173,11 @@ class ContractCostItem(bpy.types.Operator, tool.Ifc.Operator):
     bl_description = "Contract a cost item"
     cost_item: bpy.props.IntProperty()
 
+    if TYPE_CHECKING:
+        cost_item: int
+
     def _execute(self, context):
-        core.contract_cost_item(tool.Cost, cost_item=tool.Ifc.get().by_id(self.cost_item))
+        core.contract_cost_item(tool.Cost, cost_item_id=self.cost_item)
 
 
 class ContractCostItems(bpy.types.Operator, tool.Ifc.Operator):
@@ -180,7 +185,6 @@ class ContractCostItems(bpy.types.Operator, tool.Ifc.Operator):
     bl_label = "Contract Cost Item"
     bl_options = {"REGISTER", "UNDO"}
     bl_description = "Collapse cost item tree"
-    cost_item: bpy.props.IntProperty()
 
     def _execute(self, context):
         core.contract_cost_items(tool.Cost)
@@ -191,6 +195,9 @@ class RemoveCostItem(bpy.types.Operator, tool.Ifc.Operator):
     bl_label = "Remove Cost Item"
     bl_options = {"REGISTER", "UNDO"}
     cost_item: bpy.props.IntProperty()
+
+    if TYPE_CHECKING:
+        cost_item: int
 
     def _execute(self, context):
         core.remove_cost_item(tool.Ifc, tool.Cost, cost_item_id=self.cost_item)
@@ -608,11 +615,12 @@ class LoadCostItemQuantities(bpy.types.Operator):
         core.load_cost_item_quantities(tool.Cost)
         return {"FINISHED"}
 
+
 class ShowAssignedCostRate(bpy.types.Operator):
     bl_idname = "bim.show_assigned_cost_rate"
     bl_label = "Info about the assigned cost item rate"
     bl_options = {"REGISTER"}
-    assigned_rate_id: bpy.props.IntProperty()
+    assigned_rate_identification: bpy.props.StringProperty()
     assigned_rate_name: bpy.props.StringProperty()
     assigned_rate_description: bpy.props.StringProperty()
     assigned_rate_total_value: bpy.props.FloatProperty()
@@ -622,13 +630,13 @@ class ShowAssignedCostRate(bpy.types.Operator):
         return wm.invoke_props_dialog(self, width=450)
 
     def execute(self, context):
-        #core.load_cost_item_quantities(tool.Cost) IS IT NECESSARY?
+        # core.load_cost_item_quantities(tool.Cost) IS IT NECESSARY?
         return {"FINISHED"}
-    
+
     def draw(self, context):
         layout = self.layout
         wrapper = textwrap.TextWrapper(width=80)
-        layout.label(text=f"ID: {self.assigned_rate_id}")
+        layout.label(text=f"ID: {self.assigned_rate_identification}")
         layout.label(text=f"Name: {self.assigned_rate_name}")
         layout.label(text="Description:")
         for line in wrapper.wrap(str(self.assigned_rate_description)):
@@ -689,7 +697,7 @@ class AssignCostValue(bpy.types.Operator, tool.Ifc.Operator):
             tool.Ifc,
             tool.Cost,
             cost_item=tool.Ifc.get().by_id(self.cost_item),
-            cost_rate=tool.Ifc.get().by_id(self.cost_rate)
+            cost_rate=tool.Ifc.get().by_id(self.cost_rate),
         )
 
 
@@ -698,6 +706,9 @@ class ExpandCostItemRate(bpy.types.Operator, tool.Ifc.Operator):
     bl_label = "Expand Cost Item Rate"
     bl_options = {"REGISTER", "UNDO"}
     cost_item: bpy.props.IntProperty()
+
+    if TYPE_CHECKING:
+        cost_item: int
 
     def _execute(self, context):
         core.expand_cost_item_rate(tool.Cost, self.cost_item)
@@ -709,6 +720,9 @@ class ContractCostItemRate(bpy.types.Operator, tool.Ifc.Operator):
     bl_label = "Contract Cost Item Rate"
     bl_options = {"REGISTER", "UNDO"}
     cost_item: bpy.props.IntProperty()
+
+    if TYPE_CHECKING:
+        cost_item: int
 
     def _execute(self, context):
         core.contract_cost_item_rate(tool.Cost, self.cost_item)
@@ -832,13 +846,10 @@ class ReorderCostItem(bpy.types.Operator, tool.Ifc.Operator):
     cost_item: bpy.props.IntProperty()
 
     def _execute(self, context):
-        ifcopenshell.api.run(
-            "nest.reorder_nesting",
+        ifcopenshell.api.nest.reorder_nesting(
             tool.Ifc.get(),
-            **{
-                "item": tool.Ifc.get().by_id(self.cost_item),
-                "new_index": self.new_index,
-            },
+            item=tool.Ifc.get().by_id(self.cost_item),
+            new_index=self.new_index,
         )
         tool.Cost.load_cost_schedule_tree()
 

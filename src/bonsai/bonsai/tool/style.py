@@ -28,7 +28,8 @@ import bonsai.core.tool
 import bonsai.tool as tool
 import bonsai.bim.helper
 from mathutils import Color
-from typing import Union, Any, Optional, Literal, TYPE_CHECKING, Sequence
+from typing import Union, Any, Optional, Literal, TYPE_CHECKING
+from collections.abc import Sequence
 
 if TYPE_CHECKING:
     from bonsai.bim.prop import Attribute
@@ -613,7 +614,10 @@ class Style(bonsai.core.tool.Style):
     def assign_style_to_object(cls, style: ifcopenshell.entity_instance, obj: bpy.types.Object) -> None:
         """assigns `style` to `object` current representation"""
         representation = tool.Geometry.get_active_representation(obj)
-        tool.Ifc.run("style.assign_representation_styles", shape_representation=representation, styles=[style])
+        assert representation
+        ifcopenshell.api.style.assign_representation_styles(
+            tool.Ifc.get(), shape_representation=representation, styles=[style]
+        )
 
     @classmethod
     def assign_style_to_representation_item(

@@ -28,7 +28,8 @@ from ..entity_instance import entity_instance
 
 from . import has_occ
 
-from typing import TypeVar, Union, Optional, Generator, Any, Literal, overload, TYPE_CHECKING, Iterable, cast, TypedDict
+from typing import TypeVar, Union, Optional, Any, Literal, overload, TYPE_CHECKING, cast
+from collections.abc import Generator, Iterable
 
 if TYPE_CHECKING:
     from OCC.Core import TopoDS
@@ -66,6 +67,7 @@ SETTING = Literal[
     "apply-default-materials",
     "boolean-attempt-2d",
     "building-local-placement",
+    "cache-shapes",
     "cgal-original-edges",
     "circle-segments",
     "compute-curvature",
@@ -92,12 +94,14 @@ SETTING = Literal[
     "mesher-linear-deflection",
     "model-offset",
     "model-rotation",
+    "no-clean-triangulation",
     "no-normals",
     "no-parallel-mapping",
     "no-wire-intersection-check",
     "no-wire-intersection-tolerance",
-    "precision",
+    "permissive-shape-reuse",
     "precision-factor",
+    "precision",
     "reorient-shells",
     "site-local-placement",
     "surface-colour",
@@ -141,7 +145,7 @@ class settings_mixin:
     """
 
     def __init__(self, **kwargs):
-        super(settings_mixin, self).__init__()
+        super().__init__()
         for k, v in kwargs.items():
             self.set(getattr(self, k), v)
 
@@ -365,7 +369,7 @@ class tree(ifcopenshell_wrapper.tree):
     def select(
         self,
         value: Union[
-            entity_instance, ifcopenshell_wrapper.BRepElement, tuple[float, float, float], "TopoDS.TopoDS_Shape"
+            entity_instance, ifcopenshell_wrapper.BRepElement, tuple[float, float, float], TopoDS.TopoDS_Shape
         ],
         **kwargs,
     ) -> list[entity_instance]:
