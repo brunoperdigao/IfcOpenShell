@@ -131,6 +131,7 @@ classes = (
     prop.SnapMousePoint,
     prop.PolylinePoint,
     prop.Polyline,
+    prop.InteractivePoint,
     prop.ProductPreviewItem,
     prop.BIMModelProperties,
     prop.BIMArrayProperties,

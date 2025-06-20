@@ -1144,12 +1144,22 @@ class Polyline(PropertyGroup):
     area: bpy.props.StringProperty(name="Measured Area")
     total_length: bpy.props.StringProperty(name="Total Length")
 
+class InteractivePoint(PropertyGroup):
+    category: bpy.props.StringProperty(name="Category")
+    text: bpy.props.StringProperty(name="Text")
+    x: bpy.props.FloatProperty(name="X")
+    y: bpy.props.FloatProperty(name="Y")
+    z: bpy.props.FloatProperty(name="Z")
+    width: bpy.props.FloatProperty(name="Width")
+    height: bpy.props.FloatProperty(name="Height")
+    selected: bpy.props.BoolProperty(name="Selected", default=False)
 
 class BIMPolylineProperties(PropertyGroup):
     snap_mouse_point: bpy.props.CollectionProperty(type=SnapMousePoint)
     snap_mouse_ref: bpy.props.CollectionProperty(type=SnapMousePoint)
     insertion_polyline: bpy.props.CollectionProperty(type=Polyline)
     measurement_polyline: bpy.props.CollectionProperty(type=Polyline)
+    interactive_point: bpy.props.CollectionProperty(type=InteractivePoint)
 
 
 class ProductPreviewItem(PropertyGroup):

@@ -1135,6 +1135,7 @@ class FaceAreaDecorator:
 class QuickEditDecorator:
     is_installed = False
     handlers = []
+    points = None
     # event = None
     # input_type = None
     # input_ui = None
@@ -1165,57 +1166,10 @@ class QuickEditDecorator:
         cls.is_installed = False
 
     @classmethod
-    def update(cls, vertices, dimensions):
-        cls.vertices = vertices
-        cls.dimensions = dimensions
+    def update(cls, points, labels):
+        cls.points = points
+        cls.labels = labels
 
-    @classmethod
-    def get_axis(cls, context):
-        obj = context.active_object
-        element = tool.Ifc.get_entity(obj)
-        layers = tool.Model.get_material_layer_parameters(element)
-        axis = tool.Model.get_wall_axis(obj, layers)
-        start = Vector((axis["reference"][0][0], axis["reference"][0][1], obj.location.z))
-        cls.start = cls.create_interactive_vertices(context, "axis_start", start)
-        end = Vector((axis["reference"][1][0], axis["reference"][1][1], obj.location.z))
-        cls.end = cls.create_interactive_vertices(context, "axis_end", end)
-
-        representation = ifcopenshell.util.representation.get_representation(element, "Model", "Body", "MODEL_VIEW")
-        if not representation:
-            return
-        extrusion = tool.Model.get_extrusion(representation)
-        if not extrusion:
-            return
-        height = Vector((axis["reference"][0][0], axis["reference"][0][1], extrusion.Depth / 1000)) # TODO Uso Unit Scale
-        cls.height = cls.create_interactive_vertices(context, "height", height)
-        cls.vertices = [cls.start, cls.end, cls.height]
-
-        # length = cls.create_interactive_text(context, "length", (end - start).length)
-        # self.height = extrusion.Depth / 1000
-        # height = cls.create_interactive_text(context, "height", extrusion.Depth / 1000)
-        # cls.dimensions = [length, height]
-        return cls.vertices
-
-    @classmethod
-    def create_interactive_vertices(cls, context, type: str, vec: Vector) -> dict:
-        return {
-            "vector": vec,
-            "type": type,
-            "selected": False,
-            "input": False,
-        }
-
-    @classmethod
-    def create_interactive_text(cls, context, type: str, text: str, position: Vector, length: Vector) -> dict:
-        return {
-            "type": type,
-            "text": text,
-            "position": position,
-            "length": length,
-            "selected": False,
-            "input": False,
-        }
-        
     def draw_batch(self, shader_type, content_pos, color, indices=None):
         if not tool.Blender.validate_shader_batch_data(content_pos, indices):
             return
@@ -1225,25 +1179,85 @@ class QuickEditDecorator:
         batch.draw(shader)
 
     @classmethod
-    def get_dimensions(cls, context: bpy.types.Context):
+    def create_interactive_decorator(cls, context, category: str, position: Vector, text: str = None,  length: Vector = None) -> dict:
+        interactive_decorator = context.scene.BIMPolylineProperties.interactive_point.add()
+        interactive_decorator.category = category
+        interactive_decorator.x = position[0]
+        interactive_decorator.y = position[1]
+        interactive_decorator.z = position[2]
+        if text:
+            interactive_decorator.text = text
+        if length:
+            interactive_decorator.width = length[0]
+            interactive_decorator.heigth = length[1]
+        interactive_decorator.selected = False
+        return interactive_decorator
+    
+    # @classmethod
+    # def get_points(cls, context):
+    #     obj = context.active_object
+    #     element = tool.Ifc.get_entity(obj)
+    #     layers = tool.Model.get_material_layer_parameters(element)
+    #     axis = tool.Model.get_wall_axis(obj, layers)
+    #     start = Vector((axis["reference"][0][0], axis["reference"][0][1], obj.location.z))
+    #     start = cls.create_interactive_decorator(context, "axis_start", start)
+    #     end = Vector((axis["reference"][1][0], axis["reference"][1][1], obj.location.z))
+    #     end = cls.create_interactive_decorator(context, "axis_end", end)
+
+    #     representation = ifcopenshell.util.representation.get_representation(element, "Model", "Body", "MODEL_VIEW")
+    #     if not representation:
+    #         return
+    #     extrusion = tool.Model.get_extrusion(representation)
+    #     if not extrusion:
+    #         return
+    #     height = Vector((axis["reference"][0][0], axis["reference"][0][1], extrusion.Depth / 1000)) # TODO Use Unit Scale
+    #     cls.height = cls.create_interactive_decorator(context, "height", height)
+    #     cls.points = [start, end, height]
+    #     for p in cls.points:
+    #         print("POINTTTT 111111")
+    #         print(p.x, p.y, p.z)
+
+    #     return cls.points
+    
+    @classmethod
+    def get_labels(cls, context: bpy.types.Context):
+        obj = context.active_object
+        element = tool.Ifc.get_entity(obj)
+        layers = tool.Model.get_material_layer_parameters(element)
+        axis = tool.Model.get_wall_axis(obj, layers)
+        start = Vector((axis["reference"][0][0], axis["reference"][0][1], obj.location.z))
+        start = cls.create_interactive_decorator(context, "point_start", start)
+        end = Vector((axis["reference"][1][0], axis["reference"][1][1], obj.location.z))
+        end = cls.create_interactive_decorator(context, "point_end", end)
+
+        representation = ifcopenshell.util.representation.get_representation(element, "Model", "Body", "MODEL_VIEW")
+        if not representation:
+            return
+        extrusion = tool.Model.get_extrusion(representation)
+        if not extrusion:
+            return
+        height = Vector((axis["reference"][0][0], axis["reference"][0][1], extrusion.Depth / 1000)) # TODO Use Unit Scale
+        height = cls.create_interactive_decorator(context, "point_height", height)
+        
         font_id = 1
         font_size = tool.Blender.scale_font_size(12)
         blf.size(font_id, font_size)
 
-        text = str((cls.end["vector"] - cls.start["vector"]).length)
-        dim_text_pos = (cls.start["vector"] + cls.end["vector"]) / 2
+        v_start = Vector((start.x, start.y, start.z))
+        v_end = Vector((end.x, end.y, end.z))
+        text = str((v_end - v_start).length)
+        dim_text_pos = (v_start + v_end) / 2
         text_length = blf.dimensions(font_id, text)
-        length = cls.create_interactive_text(context, "text_length", text, Vector(dim_text_pos), Vector(text_length))
+        text_length = cls.create_interactive_decorator(context, "label_length", Vector(dim_text_pos), text, Vector(text_length))
 
-        text = str(cls.height["vector"])
-        dim_text_pos = (cls.start["vector"] + cls.height["vector"]) / 2
+        v_height = Vector((height.x, height.y, height.z))
+        text = str(v_height)
+        dim_text_pos = (v_start + v_height) / 2
         text_length = blf.dimensions(font_id, text)
-        height = cls.create_interactive_text(context, "text_height", text, Vector(dim_text_pos), Vector(text_length))
-        cls.dimensions = [length, height]
-        
-        return cls.dimensions
+        text_height = cls.create_interactive_decorator(context, "label_height", Vector(dim_text_pos), text, Vector(text_length))
 
     def draw_dimensions(self, context: bpy.types.Context):
+        self.points = context.scene.BIMPolylineProperties.interactive_point
         region = context.region
         rv3d = region.data
         self.addon_prefs = tool.Blender.get_addon_preferences()
@@ -1254,20 +1268,23 @@ class QuickEditDecorator:
         blf.enable(self.font_id, blf.SHADOW)
         blf.shadow(self.font_id, 6, 0, 0, 0, 1)
 
-        for dim in self.dimensions:
+        for label in self.points:
+            if not label.category.startswith("label"):
+                continue
             color = self.addon_prefs.decorations_colour
-            text = dim["text"]
-            dim_text_pos = dim["position"]
+            text = label.text
+            dim_text_pos = (label.x, label.y, label.z)
             dim_text_coords = view3d_utils.location_3d_to_region_2d(region, rv3d, dim_text_pos)
             blf.position(self.font_id, dim_text_coords[0], dim_text_coords[1], 0)
             text_length = blf.dimensions(self.font_id, text)
-            PolylineDecorator().draw_text_background(context, dim_text_coords, text_length)
-            if dim["selected"]:
+            # PolylineDecorator().draw_text_background(context, dim_text_coords, text_length)
+            if label.selected:
                 color = (0, 0, 1, 1)
             blf.color(self.font_id, *color)
             blf.draw(self.font_id, text)
         
     def draw_gizmos(self, context: bpy.types.Context):
+        self.points = context.scene.BIMPolylineProperties.interactive_point
         self.addon_prefs = tool.Blender.get_addon_preferences()
         self.line_shader = gpu.shader.from_builtin("POLYLINE_UNIFORM_COLOR")
         self.line_shader.bind()  # required to be able to change uniforms of the shader
@@ -1276,8 +1293,10 @@ class QuickEditDecorator:
         self.line_shader.uniform_float("lineWidth", 2.0)
         gpu.state.point_size_set(6)
         gpu.state.blend_set("ALPHA")
-        for vertice in self.vertices:
+        for point in self.points:
+            if not point.category.startswith("point"):
+                continue
             decorator_color = self.addon_prefs.decorator_color_special
-            if vertice["selected"]:
+            if point.selected:
                 decorator_color = (0, 1, 0, 1)
-            self.draw_batch("POINTS", [vertice["vector"]], decorator_color)
+            self.draw_batch("POINTS", [Vector((point.x, point.y, point.z))], decorator_color)
