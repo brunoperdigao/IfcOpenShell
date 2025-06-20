@@ -486,6 +486,7 @@ class PolylineDecorator:
         blf.disable(self.font_id, blf.SHADOW)
 
     def draw_text_background(self, context, coords_dim, text_dim):
+        self.shader_config(context)
         padding = 5
         theme = context.preferences.themes.items()[0][1]
         color = (*theme.user_interface.wcol_menu_back.inner[:3], 0.5)  # unwrap color values and adds alpha
@@ -1152,8 +1153,8 @@ class QuickEditDecorator:
         if cls.is_installed:
             cls.uninstall()
         handler = cls()
-        cls.handlers.append(SpaceView3D.draw_handler_add(handler.draw_gizmos, (context,), "WINDOW", "POST_VIEW"))
-        cls.handlers.append(SpaceView3D.draw_handler_add(handler.draw_dimensions, (context,), "WINDOW", "POST_PIXEL"))
+        cls.handlers.append(SpaceView3D.draw_handler_add(handler.draw_points, (context,), "WINDOW", "POST_VIEW"))
+        cls.handlers.append(SpaceView3D.draw_handler_add(handler.draw_labels, (context,), "WINDOW", "POST_PIXEL"))
         cls.is_installed = True
 
     @classmethod
@@ -1193,34 +1194,9 @@ class QuickEditDecorator:
         interactive_decorator.selected = False
         return interactive_decorator
     
-    # @classmethod
-    # def get_points(cls, context):
-    #     obj = context.active_object
-    #     element = tool.Ifc.get_entity(obj)
-    #     layers = tool.Model.get_material_layer_parameters(element)
-    #     axis = tool.Model.get_wall_axis(obj, layers)
-    #     start = Vector((axis["reference"][0][0], axis["reference"][0][1], obj.location.z))
-    #     start = cls.create_interactive_decorator(context, "axis_start", start)
-    #     end = Vector((axis["reference"][1][0], axis["reference"][1][1], obj.location.z))
-    #     end = cls.create_interactive_decorator(context, "axis_end", end)
-
-    #     representation = ifcopenshell.util.representation.get_representation(element, "Model", "Body", "MODEL_VIEW")
-    #     if not representation:
-    #         return
-    #     extrusion = tool.Model.get_extrusion(representation)
-    #     if not extrusion:
-    #         return
-    #     height = Vector((axis["reference"][0][0], axis["reference"][0][1], extrusion.Depth / 1000)) # TODO Use Unit Scale
-    #     cls.height = cls.create_interactive_decorator(context, "height", height)
-    #     cls.points = [start, end, height]
-    #     for p in cls.points:
-    #         print("POINTTTT 111111")
-    #         print(p.x, p.y, p.z)
-
-    #     return cls.points
     
     @classmethod
-    def get_labels(cls, context: bpy.types.Context):
+    def create_interactive_decoratorst(cls, context: bpy.types.Context):
         obj = context.active_object
         element = tool.Ifc.get_entity(obj)
         layers = tool.Model.get_material_layer_parameters(element)
@@ -1256,7 +1232,7 @@ class QuickEditDecorator:
         text_length = blf.dimensions(font_id, text)
         text_height = cls.create_interactive_decorator(context, "label_height", Vector(dim_text_pos), text, Vector(text_length))
 
-    def draw_dimensions(self, context: bpy.types.Context):
+    def draw_labels(self, context: bpy.types.Context):
         self.points = context.scene.BIMPolylineProperties.interactive_point
         region = context.region
         rv3d = region.data
@@ -1277,13 +1253,13 @@ class QuickEditDecorator:
             dim_text_coords = view3d_utils.location_3d_to_region_2d(region, rv3d, dim_text_pos)
             blf.position(self.font_id, dim_text_coords[0], dim_text_coords[1], 0)
             text_length = blf.dimensions(self.font_id, text)
-            # PolylineDecorator().draw_text_background(context, dim_text_coords, text_length)
+            PolylineDecorator().draw_text_background(context, dim_text_coords, text_length)
             if label.selected:
                 color = (0, 0, 1, 1)
             blf.color(self.font_id, *color)
             blf.draw(self.font_id, text)
         
-    def draw_gizmos(self, context: bpy.types.Context):
+    def draw_points(self, context: bpy.types.Context):
         self.points = context.scene.BIMPolylineProperties.interactive_point
         self.addon_prefs = tool.Blender.get_addon_preferences()
         self.line_shader = gpu.shader.from_builtin("POLYLINE_UNIFORM_COLOR")

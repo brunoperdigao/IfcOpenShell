@@ -543,7 +543,6 @@ class Polyline(bonsai.core.tool.Polyline):
         polyline_point.x = x
         polyline_point.y = y
         polyline_point.z = z
-        print("XYZ", x, y, z)
 
         polyline_point.dim = d
         polyline_point.angle = a
