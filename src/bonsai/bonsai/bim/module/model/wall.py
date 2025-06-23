@@ -153,7 +153,7 @@ class QuickEditWalls(bpy.types.Operator, PolylineOperator, tool.Ifc.Operator):
         self.interactive_labels = None
         self.selected = None
         self.height = None
-        self.moving = None
+        self.editiing = None
         self.connection = None
 
     def modal(self, context, event):
@@ -165,22 +165,26 @@ class QuickEditWalls(bpy.types.Operator, PolylineOperator, tool.Ifc.Operator):
         self.handle_lock_axis(context, event)  # Must come before "PASS_THROUGH"
         self.handle_mouse_move(context, event, should_round=True)
 
-        # TODO Enter to confirm point. Axis or Height
-        # TODO E instead of G to use the extend instead of changing the point freely
-        # TODO Create interactive text dimension label and allow to change it.
+        # TODO Add height change by the label
+        # TODO Create a function for each execution
+        # TODO Improve input handling for labels
+        # TODO Use proper unit scale
         # TODO Allow flip
         # TODO Allow offset
         # TODO Allow x_angle
 
+        # Decorator Selection
         if event.value == "PRESS" and event.type == "LEFTMOUSE":
             mouse_pos = event.mouse_region_x, event.mouse_region_y
-            for value in self.interactive_decorators:
-                vec_2d = location_3d_to_region_2d(context.region, context.region_data, (value.x, value.y, value.z))
+            for decorator in self.interactive_decorators:
+                position_2d = location_3d_to_region_2d(context.region, context.region_data, (decorator.x, decorator.y, decorator.z))
+                area_2d = (0.0, 0.0)
+                area_2d = (decorator.width, decorator.height)
                 selection_area = (
-                    vec_2d[0] - 10,
-                    vec_2d[1] - 10,
-                    vec_2d[0] + 10,
-                    vec_2d[1] + 10,
+                    position_2d[0] - 10,
+                    position_2d[1] - 10,
+                    position_2d[0] + area_2d[0] + 10,
+                    position_2d[1] + area_2d[1]  + 10,
                 )
                 if (
                     mouse_pos[0] > selection_area[0]
@@ -188,34 +192,16 @@ class QuickEditWalls(bpy.types.Operator, PolylineOperator, tool.Ifc.Operator):
                     and mouse_pos[0] < selection_area[2]
                     and mouse_pos[1] < selection_area[3]
                     ):
-                        value.selected = True
-                        self.selected = value.category
+                        decorator.selected = True
+                        self.selected = decorator.category
                 else:
-                    value.selected = False
-            # for label in self.interactive_labels:
-            #     vec_2d_1 = location_3d_to_region_2d(context.region, context.region_data, (label.x, label.y, label.z))
-            #     vec_2d_2 = (label.width, label.height)
-            #     selection_area = (
-            #         vec_2d_1[0] - 10,
-            #         vec_2d_1[1] - 10,
-            #         vec_2d_1[0] + vec_2d_2[0] + 10,
-            #         vec_2d_1[1] + vec_2d_2[1]  + 10,
-            #     )
-            #     if (
-            #         mouse_pos[0] > selection_area[0]
-            #         and mouse_pos[1] > selection_area[1]
-            #         and mouse_pos[0] < selection_area[2]
-            #         and mouse_pos[1] < selection_area[3]
-            #         ):
-            #             label.selected = True
-            #             self.selected = label.category
-            #     else:
-            #         label.selected = False
+                    decorator.selected = False
             QuickEditDecorator.update(self.interactive_decorators, self.interactive_labels)
             tool.Blender.update_viewport()
         
-        if event.value == "RELEASE" and event.type in {"G"}:
-            self.moving = True
+        # Editing point decorators
+        if self.selected and (event.value == "RELEASE" and event.type in {"G"}):
+            self.editiing = True
             PolylineDecorator.install(context)
             start = next(p for p in self.interactive_decorators if p.category == "point_start")
             v1 = Vector((start.x, start.y, start.z))
@@ -223,52 +209,79 @@ class QuickEditWalls(bpy.types.Operator, PolylineOperator, tool.Ifc.Operator):
             v2 = Vector((end.x, end.y, end.z))
             direction = v2 - v1
             angle = atan2(direction.y, direction.x)
-            value = None
+            decorator = None
 
             if self.selected == "point_start":
-                value = start
+                decorator = start
                 self.tool_state.lock_axis = True
                 self.tool_state.snap_angle = degrees(angle)
                 self.connection = "ATSTART"
             elif self.selected == "point_end":
-                value = end
+                decorator = end
                 self.tool_state.lock_axis = True
                 self.tool_state.snap_angle = degrees(angle)
                 self.connection = "ATEND"
             elif self.selected == "point_height":
-                value = next(p for p in self.interactive_decorators if p.category == "point_height")
+                decorator = next(p for p in self.interactive_decorators if p.category == "point_height")
                 self.tool_state.use_default_container = False
                 self.tool_state.plane_method = "YZ" if self.tool_state.plane_method != "YZ" else None
-                self.tool_state.plane_origin = Vector((value.x, value.y, value.z))
+                self.tool_state.plane_origin = Vector((decorator.x, decorator.y, decorator.z))
                 self.tool_state.axis_method = None
                 tool.Blender.update_viewport()
                 self.tool_state.lock_axis = True
                 self.tool_state.snap_angle = 90 # TODO This angle should be based on x_angle
 
-            if value:
-                self.input_ui.set_value("X", value.x)
-                self.input_ui.set_value("Y", value.y)
-                self.input_ui.set_value("Z", value.z)
+            if decorator:
+                self.input_ui.set_value("X", decorator.x)
+                self.input_ui.set_value("Y", decorator.y)
+                self.input_ui.set_value("Z", decorator.z)
                 result = tool.Polyline.insert_polyline_point(self.input_ui, self.tool_state)
                 PolylineDecorator.update(event, self.tool_state, self.input_ui, self.snapping_points[0])
                 tool.Blender.update_viewport()
+
+        # Editing label decorators
+        if self.selected and (event.value == "RELEASE" and event.type in {"TAB"}):
+            if self.selected.startswith("label"):
+                self.editiing = True
+                self.input_ui.input_options = ["D"]
+                QuickEditDecorator.uninstall()
+                PolylineDecorator.install(context)
+
 
         if event.type in {"MIDDLEMOUSE", "WHEELUPMOUSE", "WHEELDOWNMOUSE"}:
             return {"PASS_THROUGH"}
 
         if event.value == "PRESS" and event.type in {"RIGHTMOUSE"}:
-            self.moving = False
+            self.editiing = False
             PolylineDecorator.uninstall()
             tool.Blender.update_viewport()
 
-        if self.moving:
+        # Confirm editing
+        if self.editiing:
             self.handle_mouse_move(context, event, should_round=True)
             self.choose_axis(event)
             self.handle_snap_selection(context, event)
 
+            # Execute change from label decorator
+            if event.value == "RELEASE" and event.type in {"RET", "NUMPAD_ENTER", "RIGHTMOUSE", "LEFTMOUSE"} and self.selected in {"label_length"}:
+                    wall = context.active_object
+                    element = tool.Ifc.get_entity(wall)
+                    o1, o2 = ifcopenshell.util.representation.get_reference_line(element)
+                    p2 = self.input_ui.get_number_value("D")
+                    p2 = np.asarray((p2, 0.0))
+                    DumbWallJoiner().set_axis(element, o1, p2)
+                    tool.Model.recreate_wall(element, wall)
+                    tool.Polyline.clear_polyline()
+                    PolylineDecorator.uninstall()
+                    context.scene.BIMPolylineProperties.interactive_point.clear()
+                    QuickEditDecorator.uninstall()
+                    tool.Blender.update_viewport()
+                    return {"FINISHED"}
+
+            # Execute change from start and end points decorator
             if event.value == "RELEASE" and event.type in {"RET", "NUMPAD_ENTER", "RIGHTMOUSE", "LEFTMOUSE"} and self.selected in {"point_start", "point_end"}:
 
-                self.moving = False
+                self.editiing = False
                 if self.tool_state.is_input_on:
                     is_valid = self.recalculate_inputs(context)
                     if is_valid:
@@ -280,24 +293,21 @@ class QuickEditWalls(bpy.types.Operator, PolylineOperator, tool.Ifc.Operator):
                     if result:
                         self.report({"WARNING"}, result)
                 if not self.tool_state.lock_axis:
-                    print("FOI")
                     wall = context.active_object
                     element = tool.Ifc.get_entity(wall)
                     o1, o2 = ifcopenshell.util.representation.get_reference_line(element)
-                    value = context.scene.BIMPolylineProperties.insertion_polyline[0].polyline_points[1]
+                    decorator = context.scene.BIMPolylineProperties.insertion_polyline[0].polyline_points[1]
                     start = next(p for p in self.interactive_decorators if p.category == "point_start")
-                    direction = Vector((value.x, value.y, value.z)) - Vector((start.x, start.y, start.z))
-                    # value = np.asarray((value.x, value.y))
-                    # direction = value - o1
+                    direction = Vector((decorator.x, decorator.y, decorator.z)) - Vector((start.x, start.y, start.z))
                     length = direction.length
                     p2 = np.asarray((length * 1000, 0.0))
                     angle = atan2(direction[1], direction[0])
-                    print(o1, o2, p2)
                     DumbWallJoiner().set_axis(element, o1, p2)
                     tool.Model.recreate_wall(element, wall)
                     wall.rotation_euler.z = angle
                     tool.Polyline.clear_polyline()
                     PolylineDecorator.uninstall()
+                    context.scene.BIMPolylineProperties.interactive_point.clear()
                     QuickEditDecorator.uninstall()
                     tool.Blender.update_viewport()
                     return {"FINISHED"}
@@ -308,26 +318,27 @@ class QuickEditWalls(bpy.types.Operator, PolylineOperator, tool.Ifc.Operator):
                     tool.Blender.set_active_object(snap_obj)
                     ExtendWallsToWall._execute(self, context)
                 else:
-                    value = context.scene.BIMPolylineProperties.insertion_polyline[0].polyline_points[1]
+                    decorator = context.scene.BIMPolylineProperties.insertion_polyline[0].polyline_points[1]
                     core.extend_walls(
                         tool.Ifc,
                         tool.Blender,
                         tool.Geometry,
                         DumbWallJoiner(),
                         tool.Model,
-                        Vector((value.x, value.y, value.z)),
+                        Vector((decorator.x, decorator.y, decorator.z)),
                         self.connection,
                     )
 
                 tool.Polyline.clear_polyline()
                 context.workspace.status_text_set(text=None)
                 PolylineDecorator.uninstall()
+                context.scene.BIMPolylineProperties.interactive_point.clear()
                 QuickEditDecorator.uninstall()
                 tool.Blender.update_viewport()
                 return {"FINISHED"}
 
             if event.value == "RELEASE" and event.type in {"RET", "NUMPAD_ENTER", "RIGHTMOUSE", "LEFTMOUSE"} and self.selected in {"point_height"}:
-                self.moving = False
+                self.editiing = False
                 if self.tool_state.is_input_on:
                     is_valid = self.recalculate_inputs(context)
                     if is_valid:
@@ -339,16 +350,17 @@ class QuickEditWalls(bpy.types.Operator, PolylineOperator, tool.Ifc.Operator):
                     if result:
                         self.report({"WARNING"}, result)
 
-                for value in self.interactive_decorators:
-                    if value.category == "point_height":
-                        value = context.scene.BIMPolylineProperties.insertion_polyline[0].polyline_points[1]
-                        self.depth = value.z
+                for decorator in self.interactive_decorators:
+                    if decorator.category == "point_height":
+                        decorator = context.scene.BIMPolylineProperties.insertion_polyline[0].polyline_points[1]
+                        self.depth = decorator.z
                         ChangeExtrusionDepth._execute(self, context)
 
                 tool.Polyline.clear_polyline()
                 context.workspace.status_text_set(text=None)
                 PolylineDecorator.uninstall()
                 QuickEditDecorator.uninstall()
+                context.scene.BIMPolylineProperties.interactive_point.clear()
                 tool.Blender.update_viewport()
                 return {"FINISHED"}
 
@@ -359,6 +371,7 @@ class QuickEditWalls(bpy.types.Operator, PolylineOperator, tool.Ifc.Operator):
                 return cancel
             
         if event.value == "RELEASE" and event.type in {"ESC"}:
+            context.scene.BIMPolylineProperties.interactive_point.clear()
             QuickEditDecorator.uninstall()
             tool.Blender.update_viewport()
             return {"CANCELLED"}

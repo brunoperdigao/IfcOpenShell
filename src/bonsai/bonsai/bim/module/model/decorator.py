@@ -1188,6 +1188,9 @@ class QuickEditDecorator:
         interactive_decorator.z = position[2]
         if text:
             interactive_decorator.text = text
+
+        interactive_decorator.width = 0.0
+        interactive_decorator.heigth = 0.0
         if length:
             interactive_decorator.width = length[0]
             interactive_decorator.heigth = length[1]
@@ -1227,7 +1230,7 @@ class QuickEditDecorator:
         text_length = cls.create_interactive_decorator(context, "label_length", Vector(dim_text_pos), text, Vector(text_length))
 
         v_height = Vector((height.x, height.y, height.z))
-        text = str(v_height)
+        text = str(v_height.z)
         dim_text_pos = (v_start + v_height) / 2
         text_length = blf.dimensions(font_id, text)
         text_height = cls.create_interactive_decorator(context, "label_height", Vector(dim_text_pos), text, Vector(text_length))
