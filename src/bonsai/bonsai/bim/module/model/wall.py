@@ -165,7 +165,6 @@ class QuickEditWalls(bpy.types.Operator, PolylineOperator, tool.Ifc.Operator):
         self.handle_lock_axis(context, event)  # Must come before "PASS_THROUGH"
         self.handle_mouse_move(context, event, should_round=True)
 
-        # TODO Add height change by the label
         # TODO Create a function for each execution
         # TODO Improve input handling for labels
         # TODO Use proper unit scale
@@ -196,7 +195,7 @@ class QuickEditWalls(bpy.types.Operator, PolylineOperator, tool.Ifc.Operator):
                         self.selected = decorator.category
                 else:
                     decorator.selected = False
-            QuickEditDecorator.update(self.interactive_decorators, self.interactive_labels)
+            QuickEditDecorator.update(self.interactive_decorators)
             tool.Blender.update_viewport()
         
         # Editing point decorators
@@ -242,10 +241,13 @@ class QuickEditWalls(bpy.types.Operator, PolylineOperator, tool.Ifc.Operator):
         # Editing label decorators
         if self.selected and (event.value == "RELEASE" and event.type in {"TAB"}):
             if self.selected.startswith("label"):
+                label = next(p for p in self.interactive_decorators if p.category == self.selected)
+                label_pos = (label.x, label.y, label.z)
                 self.editiing = True
-                self.input_ui.input_options = ["D"]
+                self.input_ui.set_value("D", label.text)
+                self.input_ui.input_options = ["D"] # TODO Create a new type of input where the input ui has a fixed position and do not follow the mouse
                 QuickEditDecorator.uninstall()
-                PolylineDecorator.install(context)
+                QuickEditDecorator.install_single_input(context, label_pos, self.input_ui)
 
 
         if event.type in {"MIDDLEMOUSE", "WHEELUPMOUSE", "WHEELDOWNMOUSE"}:
@@ -263,20 +265,26 @@ class QuickEditWalls(bpy.types.Operator, PolylineOperator, tool.Ifc.Operator):
             self.handle_snap_selection(context, event)
 
             # Execute change from label decorator
-            if event.value == "RELEASE" and event.type in {"RET", "NUMPAD_ENTER", "RIGHTMOUSE", "LEFTMOUSE"} and self.selected in {"label_length"}:
+            if event.value == "RELEASE" and event.type in {"RET", "NUMPAD_ENTER", "RIGHTMOUSE", "LEFTMOUSE"} and self.selected in {"label_length", "label_height"}:
+                if self.selected == "label_length":
                     wall = context.active_object
-                    element = tool.Ifc.get_entity(wall)
-                    o1, o2 = ifcopenshell.util.representation.get_reference_line(element)
-                    p2 = self.input_ui.get_number_value("D")
-                    p2 = np.asarray((p2, 0.0))
-                    DumbWallJoiner().set_axis(element, o1, p2)
-                    tool.Model.recreate_wall(element, wall)
+                    length = self.input_ui.get_number_value("D")
+                    DumbWallJoiner().set_length(wall, length/1000) # TODO Unit Scale
+                    # tool.Model.recreate_wall(element, wall)
                     tool.Polyline.clear_polyline()
-                    PolylineDecorator.uninstall()
                     context.scene.BIMPolylineProperties.interactive_point.clear()
                     QuickEditDecorator.uninstall()
                     tool.Blender.update_viewport()
                     return {"FINISHED"}
+                if self.selected == "label_height":
+                    self.depth = self.input_ui.get_number_value("D")
+                    ChangeExtrusionDepth._execute(self, context)
+                    tool.Polyline.clear_polyline()
+                    context.scene.BIMPolylineProperties.interactive_point.clear()
+                    QuickEditDecorator.uninstall()
+                    tool.Blender.update_viewport()
+                    return {"FINISHED"}
+
 
             # Execute change from start and end points decorator
             if event.value == "RELEASE" and event.type in {"RET", "NUMPAD_ENTER", "RIGHTMOUSE", "LEFTMOUSE"} and self.selected in {"point_start", "point_end"}:
@@ -312,6 +320,7 @@ class QuickEditWalls(bpy.types.Operator, PolylineOperator, tool.Ifc.Operator):
                     tool.Blender.update_viewport()
                     return {"FINISHED"}
 
+                # TODO Having a snap obj doesn't always mean the objs intersect
                 snap_prop = context.scene.BIMPolylineProperties.snap_mouse_point[0]
                 snap_obj = bpy.data.objects.get(snap_prop.snap_object)
                 if snap_obj and tool.Ifc.get_entity(snap_obj).is_a("IfcWall"):
@@ -390,7 +399,7 @@ class QuickEditWalls(bpy.types.Operator, PolylineOperator, tool.Ifc.Operator):
         tool.Polyline.calculate_distance_and_angle(context, self.input_ui, self.tool_state)
         tool.Blender.update_viewport()
         QuickEditDecorator.install(context)
-        QuickEditDecorator.create_interactive_decoratorst(context)
+        QuickEditDecorator.create_interactive_decorators(context)
         self.interactive_decorators = context.scene.BIMPolylineProperties.interactive_point
         tool.Blender.update_viewport()
         return {"RUNNING_MODAL"}
@@ -818,6 +827,7 @@ class ChangeLayerLength(bpy.types.Operator, tool.Ifc.Operator):
         joiner = DumbWallJoiner()
         selected_objs = tool.Model.get_selected_mesh_ifc_objects()
         for obj in selected_objs:
+            print(self.length, type(self.length))
             joiner.set_length(obj, self.length)
 
 

@@ -1149,7 +1149,7 @@ class QuickEditDecorator:
     # relating_type = None
 
     @classmethod
-    def install(cls, context, ui_only=False):
+    def install(cls, context):
         if cls.is_installed:
             cls.uninstall()
         handler = cls()
@@ -1167,9 +1167,8 @@ class QuickEditDecorator:
         cls.is_installed = False
 
     @classmethod
-    def update(cls, points, labels):
+    def update(cls, points):
         cls.points = points
-        cls.labels = labels
 
     def draw_batch(self, shader_type, content_pos, color, indices=None):
         if not tool.Blender.validate_shader_batch_data(content_pos, indices):
@@ -1199,7 +1198,10 @@ class QuickEditDecorator:
     
     
     @classmethod
-    def create_interactive_decoratorst(cls, context: bpy.types.Context):
+    def create_interactive_decorators(cls, context: bpy.types.Context):
+        ifc_file = tool.Ifc.get()
+        si_conversion = ifcopenshell.util.unit.calculate_unit_scale(ifc_file)
+        print(si_conversion)
         obj = context.active_object
         element = tool.Ifc.get_entity(obj)
         layers = tool.Model.get_material_layer_parameters(element)
@@ -1215,7 +1217,7 @@ class QuickEditDecorator:
         extrusion = tool.Model.get_extrusion(representation)
         if not extrusion:
             return
-        height = Vector((axis["reference"][0][0], axis["reference"][0][1], extrusion.Depth / 1000)) # TODO Use Unit Scale
+        height = Vector((axis["reference"][0][0], axis["reference"][0][1], extrusion.Depth * si_conversion)) # TODO Use Unit Scale
         height = cls.create_interactive_decorator(context, "point_height", height)
         
         font_id = 1
@@ -1251,16 +1253,17 @@ class QuickEditDecorator:
             if not label.category.startswith("label"):
                 continue
             color = self.addon_prefs.decorations_colour
-            text = label.text
+            value = float(label.text)
+            formatted_value = tool.Polyline.format_input_ui_units(value)
             dim_text_pos = (label.x, label.y, label.z)
             dim_text_coords = view3d_utils.location_3d_to_region_2d(region, rv3d, dim_text_pos)
             blf.position(self.font_id, dim_text_coords[0], dim_text_coords[1], 0)
-            text_length = blf.dimensions(self.font_id, text)
+            text_length = blf.dimensions(self.font_id, formatted_value)
             PolylineDecorator().draw_text_background(context, dim_text_coords, text_length)
             if label.selected:
                 color = (0, 0, 1, 1)
             blf.color(self.font_id, *color)
-            blf.draw(self.font_id, text)
+            blf.draw(self.font_id, formatted_value)
         
     def draw_points(self, context: bpy.types.Context):
         self.points = context.scene.BIMPolylineProperties.interactive_point
@@ -1279,3 +1282,38 @@ class QuickEditDecorator:
             if point.selected:
                 decorator_color = (0, 1, 0, 1)
             self.draw_batch("POINTS", [Vector((point.x, point.y, point.z))], decorator_color)
+
+    @classmethod
+    def install_single_input(cls, context, position, input_ui):
+        handler = cls()
+        cls.handlers.append(SpaceView3D.draw_handler_add(handler.draw_single_input, (context, position, input_ui), "WINDOW", "POST_PIXEL"))
+
+    def draw_single_input(self, context: bpy.types.Context, position, input_ui) -> None:
+        texts = {
+            "D": "",
+        }
+        self.addon_prefs = tool.Blender.get_addon_preferences()
+        self.font_id = 0
+        font_size = tool.Blender.scale_font_size(12)
+        blf.size(self.font_id, font_size)
+        blf.enable(self.font_id, blf.SHADOW)
+        blf.shadow(self.font_id, 6, 0, 0, 0, 1)
+        color = self.addon_prefs.decorations_colour
+        color_highlight = self.addon_prefs.decorator_color_special
+        offset = 20
+        new_line = 0
+        region = context.region
+        rv3d = region.data
+        text_coords = view3d_utils.location_3d_to_region_2d(region, rv3d, position)
+        formatted_value = None
+        # TODO Background
+        if input_ui:
+            formatted_value = input_ui.get_text_value("D")
+        if formatted_value is None:
+            return
+        blf.color(self.font_id, *color_highlight)
+        blf.position(self.font_id, text_coords[0], text_coords[1], 0)
+        text_length = blf.dimensions(self.font_id, formatted_value)
+        PolylineDecorator().draw_text_background(context, text_coords, text_length)
+        blf.draw(self.font_id, formatted_value)
+        blf.disable(self.font_id, blf.SHADOW)
