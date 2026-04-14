@@ -356,6 +356,10 @@ else
 	pytest test/tool/test_$(MODULE).py --maxfail=1
 endif
 
+.PHONY: test-modal
+test-modal:
+	blender --enable-event-simulate --python test/modal/test_modal.py
+
 # Reregistering test is not added to the standard test suite because during unregister
 # Blender removes all Bonsai dependencies breaking dev-environment symlinks.
 .PHONY: test-reregister

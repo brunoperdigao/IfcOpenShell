@@ -1,11 +1,12 @@
 Running tests
 =============
 
-Bonsai has three layers of tests for each of its three technology layers:
+Bonsai has four layers of tests for each of its three technology layers:
 
 1. **Core tests**: abstract domain logic unit tests agnostic of Blender
 2. **Tool tests**: low-level concrete unit tests dependent on Blender
 3. **UI tests**: high-level integration UI and smoke tests dependent on Blender
+4. **Modal tests**: tests for modal operators requiring Blender window and event simulation
 
 These tests use ``pytest`` as the test framework and runner, so install it:
 
@@ -127,6 +128,32 @@ test georeferencing features: ``Edit > Preferences > Add-ons`` and install
     # If you're on Windows, and don't want to use make, use:
     pytest test/bim # Test everything
     pytest test/bim -m "foo" ./ --maxfail=1 # Only test a single module
+
+Modal tests
+----------
+
+The modal test layer tests modal operators (interactive tools that require Blender's
+event loop). These tests use Blender's ``--enable-event-simulate`` flag to simulate
+user input like mouse clicks and key presses.
+
+Unlike other test layers, modal tests require:
+
+- A running Blender window (not headless)
+- The ``--enable-event-simulate`` flag passed to Blender
+- A scene with geometry to interact with
+
+.. code-block:: bash
+
+    cd src/bonsai/
+    make test-modal
+    # If you're on Windows, and don't want to use make, use:
+    blender --enable-event-simulate --python test/modal/test_modal.py
+
+.. warning::
+
+    Modal tests are not included in the standard ``make test`` suite because they
+    require a graphical Blender window and manual interaction is not feasible
+    in CI environments. Run them manually when needed.
 
 Code styling
 ------------
