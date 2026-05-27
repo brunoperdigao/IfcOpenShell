@@ -30,6 +30,7 @@ from mathutils import Vector
 
 import bonsai.core.tool
 import bonsai.tool as tool
+from bonsai.tool.snap_profiler import snap_profiler
 
 
 class Raycast(bonsai.core.tool.Raycast):
@@ -719,14 +720,22 @@ class Raycast(bonsai.core.tool.Raycast):
     ) -> list[bpy.types.Object]:
         mouse_pos = event.mouse_region_x, event.mouse_region_y
         objs_to_raycast = []
+        snap_profiler.count("filter_total_input", len(objs_2d_bbox))
+        bbox_passed = 0
+        clip_passed = 0
         for obj, bbox_2d in objs_2d_bbox:
             if bbox_2d:
                 if tool.Raycast.intersect_mouse_2d_bounding_box(mouse_pos, bbox_2d):
+                    bbox_passed += 1
                     if tool.Raycast.object_is_visible_in_clipping_plane(obj):
+                        clip_passed += 1
+                        snap_profiler.start("filter_create_snap_obj")
                         snap_obj = cls.create_snap_obj(obj)
+                        snap_profiler.stop("filter_create_snap_obj")
                         if snap_obj is not None:
                             objs_to_raycast.append(snap_obj)
-
+        snap_profiler.count("filter_bbox_passed", bbox_passed)
+        snap_profiler.count("filter_clip_passed", clip_passed)
         return objs_to_raycast
 
     @classmethod
@@ -816,12 +825,19 @@ class Raycast(bonsai.core.tool.Raycast):
         closest_snaps = []
         hit = None
 
+        snap_profiler.count("raycast_objs_input", len(objs_to_raycast))
+        n_wireframe = 0
+        n_solid = 0
+
         for snap_obj in objs_to_raycast:
             if snap_obj.obj.type in {"EMPTY", "CURVE"} or (
                 hasattr(snap_obj.obj.data, "polygons") and len(snap_obj.obj.data.polygons) == 0
             ):
                 # For wireframe objects we have to test all the snaps to see which is closer
+                n_wireframe += 1
+                snap_profiler.start("raycast_wireframe")
                 snap_points = tool.Raycast.ray_cast_by_proximity_2d(context, event, snap_obj)
+                snap_profiler.stop("raycast_wireframe")
                 closest_wf_hit = None
                 closest_wf_length_squared = 1.0
                 closest_wf_point = None
@@ -842,7 +858,10 @@ class Raycast(bonsai.core.tool.Raycast):
 
             else:
                 # Solid objects
+                n_solid += 1
+                snap_profiler.start("raycast_solid")
                 hit_obj, hit, face_index = cls.cast_rays_to_single_object(context, event, snap_obj.obj)
+                snap_profiler.stop("raycast_solid")
 
                 if hit:
                     snap_point = {
@@ -863,6 +882,9 @@ class Raycast(bonsai.core.tool.Raycast):
                     closest_obj = hit_obj
                     closest_hit = hit
                     closest_face_index = face_index
+
+        snap_profiler.count("raycast_wireframe_count", n_wireframe)
+        snap_profiler.count("raycast_solid_count", n_solid)
 
         # Label snaps from the closest object
         if closest_obj is not None:
@@ -894,15 +916,30 @@ class Raycast(bonsai.core.tool.Raycast):
                 # Example: adding a door or window alters the wall geometry.
                 if len(obj.data.vertices) != len(snap_obj.verts_3d):
                     cls.snap_objs.pop(i)
+                    snap_profiler.count("create_snap_obj_miss", 1)
+                    snap_profiler.start("create_snap_obj_new")
                     snap_obj = SnapObj(obj)
+                    snap_profiler.stop("create_snap_obj_new")
                     cls.snap_objs.append(snap_obj)
+                    return snap_obj
+                snap_profiler.start("create_snap_obj_verify")
                 for v1, v2 in zip(obj.data.vertices, snap_obj.verts_3d):
                     if (obj.matrix_world @ v1.co) != v2:
+                        snap_profiler.stop("create_snap_obj_verify")
                         cls.snap_objs.pop(i)
+                        snap_profiler.count("create_snap_obj_miss", 1)
+                        snap_profiler.start("create_snap_obj_new")
                         snap_obj = SnapObj(obj)
+                        snap_profiler.stop("create_snap_obj_new")
                         cls.snap_objs.append(snap_obj)
+                        return snap_obj
+                snap_profiler.stop("create_snap_obj_verify")
+                snap_profiler.count("create_snap_obj_hit", 1)
                 return snap_obj
+        snap_profiler.count("create_snap_obj_miss", 1)
+        snap_profiler.start("create_snap_obj_new")
         snap_obj = SnapObj(obj)
+        snap_profiler.stop("create_snap_obj_new")
         cls.snap_objs.append(snap_obj)
         return snap_obj
 

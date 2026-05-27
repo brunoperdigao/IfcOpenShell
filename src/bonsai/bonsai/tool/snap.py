@@ -31,6 +31,7 @@ import bonsai.tool as tool
 from bonsai.bim.module.drawing.data import DecoratorData
 from bonsai.bim.module.drawing.decoration import CutDecorator
 from bonsai.bim.module.model.decorator import PolylineDecorator
+from bonsai.tool.snap_profiler import snap_profiler
 
 if TYPE_CHECKING:
     from bonsai.bim.prop import BIMSnapGroups, BIMSnapProperties
@@ -370,7 +371,9 @@ class Snap(bonsai.core.tool.Snap):
             polyline_points = []
             last_polyline_point = None
         if polyline_points:
+            snap_profiler.start("snap_raycast_polyline")
             snap_points = tool.Raycast.ray_cast_to_polyline(context, event)
+            snap_profiler.stop("snap_raycast_polyline")
             if snap_points:
                 for point in snap_points:
                     point["group"] = "Polyline"
@@ -380,21 +383,31 @@ class Snap(bonsai.core.tool.Snap):
         measure_data = polyline_props.measurement_polyline
         for measure in measure_data:
             measure_points = measure.polyline_points
+            snap_profiler.start("snap_raycast_measure")
             snap_points = tool.Raycast.ray_cast_to_measure(context, event, measure_points)
+            snap_profiler.stop("snap_raycast_measure")
             if snap_points:
                 for point in snap_points:
                     point["group"] = "Measure"
                     detected_snaps.append(point)
 
         # Objects
+        snap_profiler.start("snap_filter_objects")
         objs_to_raycast = tool.Raycast.filter_objects_to_raycast(context, event, objs_2d_bbox)
+        snap_profiler.stop("snap_filter_objects")
+        snap_profiler.count("objs_to_raycast", len(objs_to_raycast))
+
+        snap_profiler.start("snap_raycast_closest")
         closest_snaps = tool.Raycast.ray_cast_and_get_closest_to_camera_snaps(context, event, objs_to_raycast)
+        snap_profiler.stop("snap_raycast_closest")
+        snap_profiler.count("closest_snaps", len(closest_snaps))
         detected_snaps.extend(closest_snaps)
 
         xray_mode = (space.shading.type == "SOLID" and space.shading.show_xray) or (
             space.shading.type == "WIREFRAME" and space.shading.show_xray_wireframe
         )
 
+        snap_profiler.start("snap_2d_proximity")
         for snap_obj in objs_to_raycast:
             for snap in closest_snaps:
                 if snap_obj.obj == snap["object"]:
@@ -418,6 +431,7 @@ class Snap(bonsai.core.tool.Snap):
                                     point["group"] = "Object"
                                     closest_snap.append(point)
                             detected_snaps = closest_snap
+        snap_profiler.stop("snap_2d_proximity")
 
         # snap to cut geometry (e.g. in plan view)
         if CutDecorator.installed:
@@ -467,6 +481,7 @@ class Snap(bonsai.core.tool.Snap):
                 detected_snaps = cut_snaps
 
         # Axis and Plane
+        snap_profiler.start("snap_axis_plane")
         if tool.Ifc.get():
             elevation = tool.Root.get_default_container_elevation()
         else:
@@ -508,6 +523,7 @@ class Snap(bonsai.core.tool.Snap):
                 rot_intersection, tool_state.snap_angle, axis_start, axis_end = cls.snap_on_axis(
                     intersection, tool_state
                 )
+        snap_profiler.stop("snap_axis_plane")
 
         if rot_intersection and polyline_points:
             snap_point = {

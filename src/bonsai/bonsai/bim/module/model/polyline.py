@@ -27,6 +27,7 @@ from mathutils import Vector
 
 import bonsai.tool as tool
 from bonsai.bim.module.model.decorator import PolylineDecorator
+from bonsai.tool.snap_profiler import snap_profiler
 
 
 class PolylineOperator:
@@ -409,12 +410,22 @@ class PolylineOperator:
                         self.objs_2d_bbox.append(bbox_2d)
 
             if self.mousemove_count > 3:
+                snap_profiler.start_frame()
+                snap_profiler.count("objects_in_bbox", len(self.objs_2d_bbox))
+
+                snap_profiler.start("detect_snapping_points")
                 detected_snaps = tool.Snap.detect_snapping_points(context, event, self.objs_2d_bbox, self.tool_state)
+                snap_profiler.stop("detect_snapping_points")
+
+                snap_profiler.start("select_snapping_points")
                 self.snapping_points = tool.Snap.select_snapping_points(context, event, self.tool_state, detected_snaps)
+                snap_profiler.stop("select_snapping_points")
+                snap_profiler.count("total_snaps_detected", len(detected_snaps))
 
                 if self.snapping_points[0]["type"] not in {"Plane", "Axis"}:
                     should_round = False
 
+                snap_profiler.start("post_snap_calc")
                 tool.Polyline.calculate_distance_and_angle(
                     context, self.input_ui, self.tool_state, should_round=should_round
                 )
@@ -422,6 +433,8 @@ class PolylineOperator:
                     tool.Polyline.calculate_x_y_and_z(context, self.input_ui, self.tool_state)
 
                 tool.Blender.update_viewport()
+                snap_profiler.stop("post_snap_calc")
+                snap_profiler.end_frame()
             return {"RUNNING_MODAL"}
 
     def set_offset(self, context: bpy.types.Context, relating_type: ifcopenshell.entity_instance) -> None:
