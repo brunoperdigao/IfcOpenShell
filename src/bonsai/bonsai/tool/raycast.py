@@ -378,6 +378,7 @@ class Raycast(bonsai.core.tool.Raycast):
             view3d_utils.location_3d_to_region_2d(region, rv3d, v) for v in snap_obj.verts_3d
         ]  # Numpy version is worst in performance
 
+        snap_obj._ensure_bvh()
         intersected = snap_obj.raycast_boxes(
             context, event, snap_obj.root, intersected=[], rays=(ray_origin, ray_direction)
         )
@@ -973,11 +974,20 @@ class SnapObj:
     def __init__(self, obj: bpy.types.Object):
         self.__class__.all.append(self)
         self.obj = obj
-        self.root = self._create_root_node()
-        self.root.edges = [e.index for e in obj.data.edges]
-        self.split_box(self.root, 0)
+        self.root = None
+        self._bvh_built = False
         self.verts_3d = [obj.matrix_world @ v.co for v in obj.data.vertices]
         self.snap_points = []
+
+    def _ensure_bvh(self):
+        if self._bvh_built:
+            return
+        snap_profiler.start("build_bvh_tree")
+        self.root = self._create_root_node()
+        self.root.edges = [e.index for e in self.obj.data.edges]
+        self.split_box(self.root, 0)
+        self._bvh_built = True
+        snap_profiler.stop("build_bvh_tree")
 
     def __clear_all__():
         for instance in SnapObj.all:
