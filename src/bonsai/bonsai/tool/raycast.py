@@ -823,6 +823,11 @@ class Raycast(bonsai.core.tool.Raycast):
 
         ray_origin, ray_target, ray_direction = cls.get_viewport_ray_data(context, event)
 
+        space = context.space_data
+        xray_mode = (space.shading.type == "SOLID" and space.shading.show_xray) or (
+            space.shading.type == "WIREFRAME" and space.shading.show_xray_wireframe
+        )
+
         closest_snaps = []
         hit = None
 
@@ -830,11 +835,25 @@ class Raycast(bonsai.core.tool.Raycast):
         n_wireframe = 0
         n_solid = 0
 
-        for snap_obj in objs_to_raycast:
-            if snap_obj.obj.type in {"EMPTY", "CURVE"} or (
-                hasattr(snap_obj.obj.data, "polygons") and len(snap_obj.obj.data.polygons) == 0
-            ):
-                # For wireframe objects we have to test all the snaps to see which is closer
+        if not xray_mode and objs_to_raycast:
+            # Non-xray: only the closest solid object's Face snap is kept by
+            # the caller (detect_snapping_points).  Process solids in distance
+            # order and stop at the first hit to minimise raycasts.
+            wireframe_objs = []
+            solid_objs = []
+            for so in objs_to_raycast:
+                if so.obj.type in {"EMPTY", "CURVE"} or (
+                    hasattr(so.obj.data, "polygons") and len(so.obj.data.polygons) == 0
+                ):
+                    wireframe_objs.append(so)
+                else:
+                    solid_objs.append(so)
+
+            # Rough distance: object origin to ray origin
+            solid_objs.sort(key=lambda so: (so.obj.matrix_world.translation - ray_origin).length_squared)
+
+            # Process wireframe objects first (all of them, always collected)
+            for snap_obj in wireframe_objs:
                 n_wireframe += 1
                 snap_profiler.start("raycast_wireframe")
                 snap_points = tool.Raycast.ray_cast_by_proximity_2d(context, event, snap_obj)
@@ -857,8 +876,16 @@ class Raycast(bonsai.core.tool.Raycast):
                         hit = closest_wf_point["point"]
                         face_index = None
 
-            else:
-                # Solid objects
+                if hit is not None:
+                    length_squared = (hit - ray_origin).length_squared
+                    if closest_obj is None or length_squared < closest_length_squared:
+                        closest_length_squared = length_squared
+                        closest_obj = hit_obj
+                        closest_hit = hit
+                        closest_face_index = face_index
+
+            # Process solid objects in distance order; stop at first hit
+            for snap_obj in solid_objs:
                 n_solid += 1
                 snap_profiler.start("raycast_solid")
                 hit_obj, hit, face_index = cls.cast_rays_to_single_object(context, event, snap_obj.obj)
@@ -871,18 +898,76 @@ class Raycast(bonsai.core.tool.Raycast):
                         "group": "Object",
                         "object": hit_obj,
                         "face_index": face_index,
-                        "distance": 9,  # High value so it has low priority
+                        "distance": 9,
                     }
                     closest_snaps.append(snap_point)
 
-            # Here we test which is closer, including wireframe and solid objects
-            if hit is not None:
-                length_squared = (hit - ray_origin).length_squared
-                if closest_obj is None or length_squared < closest_length_squared:
-                    closest_length_squared = length_squared
-                    closest_obj = hit_obj
-                    closest_hit = hit
-                    closest_face_index = face_index
+                    length_squared = (hit - ray_origin).length_squared
+                    if closest_obj is None or length_squared < closest_length_squared:
+                        closest_length_squared = length_squared
+                        closest_obj = hit_obj
+                        closest_hit = hit
+                        closest_face_index = face_index
+
+                    # Only the closest solid's Face snap survives in non-xray
+                    # mode (see detect_snapping_points), so we are done.
+                    break
+
+        else:
+            # Xray mode: process all objects (all snaps are kept by the caller)
+            for snap_obj in objs_to_raycast:
+                if snap_obj.obj.type in {"EMPTY", "CURVE"} or (
+                    hasattr(snap_obj.obj.data, "polygons") and len(snap_obj.obj.data.polygons) == 0
+                ):
+                    # For wireframe objects we have to test all the snaps to see which is closer
+                    n_wireframe += 1
+                    snap_profiler.start("raycast_wireframe")
+                    snap_points = tool.Raycast.ray_cast_by_proximity_2d(context, event, snap_obj)
+                    snap_profiler.stop("raycast_wireframe")
+                    closest_wf_hit = None
+                    closest_wf_length_squared = 1.0
+                    closest_wf_point = None
+                    if snap_points:
+                        for point in snap_points:
+                            point["group"] = "Wireframe"
+                            closest_snaps.append(point)
+                            length = (point["point"] - ray_origin).length_squared
+                            if closest_wf_hit is None or length < closest_wf_length_squared:
+                                closest_wf_length_squared = length
+                                closest_wf_hit = point["point"]
+                                closest_wf_point = point
+
+                        if closest_wf_point:
+                            hit_obj = closest_wf_point["object"]
+                            hit = closest_wf_point["point"]
+                            face_index = None
+
+                else:
+                    # Solid objects
+                    n_solid += 1
+                    snap_profiler.start("raycast_solid")
+                    hit_obj, hit, face_index = cls.cast_rays_to_single_object(context, event, snap_obj.obj)
+                    snap_profiler.stop("raycast_solid")
+
+                    if hit:
+                        snap_point = {
+                            "point": hit,
+                            "type": "Face",
+                            "group": "Object",
+                            "object": hit_obj,
+                            "face_index": face_index,
+                            "distance": 9,  # High value so it has low priority
+                        }
+                        closest_snaps.append(snap_point)
+
+                # Here we test which is closer, including wireframe and solid objects
+                if hit is not None:
+                    length_squared = (hit - ray_origin).length_squared
+                    if closest_obj is None or length_squared < closest_length_squared:
+                        closest_length_squared = length_squared
+                        closest_obj = hit_obj
+                        closest_hit = hit
+                        closest_face_index = face_index
 
         snap_profiler.count("raycast_wireframe_count", n_wireframe)
         snap_profiler.count("raycast_solid_count", n_solid)
