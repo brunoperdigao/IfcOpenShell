@@ -115,11 +115,13 @@ class Raycast(bonsai.core.tool.Raycast):
             cls._bbox_cache_view_sig = sig
 
         obj_id = id(obj)
+        mat_sig = tuple(obj.matrix_world.translation) + tuple(obj.matrix_world.to_euler())
         if obj_id in cls._bbox_cache:
-            cached = cls._bbox_cache[obj_id]
-            if cached is None:
-                return None
-            return (obj, list(cached))
+            cached_mat_sig, cached_bbox = cls._bbox_cache[obj_id]
+            if cached_mat_sig == mat_sig:
+                if cached_bbox is None:
+                    return None
+                return (obj, list(cached_bbox))
 
         view_location = rv3d.view_matrix.inverted().translation
         view_normal = rv3d.view_rotation @ mathutils.Vector((0.0, 0.0, -1.0))
