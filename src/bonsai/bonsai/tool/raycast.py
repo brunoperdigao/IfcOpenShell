@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 import math
-from typing import Union
+from typing import NamedTuple, Union
 
 import bmesh
 import bpy
@@ -1527,50 +1527,90 @@ class GPUSnap:
         blend_set("NONE")
 
     @classmethod
-    def _draw_batches(cls, objs_on_screen: list[tuple[bpy.types.Object, list[float]]]) -> None:
+    def _draw_all(
+        cls,
+        objs_on_screen: list[tuple[bpy.types.Object, list[float]]],
+    ) -> None:
         """
-        Draw all cached object batches into the offscreen buffer.
+        Draw all cached object batches (offscreen must be bound by caller).
 
         Each object receives a unique *offset* so that the decoded pixel
         value unambiguously identifies both the object and the primitive.
         """
         cls._ensure_shader()
-        cls._ensure_offscreen()
 
-        cls._next_offset = 1
-        cls._offscreen.bind()
+        cls._gl_enable()
+        cls.shader.bind()
 
-        try:
-            cls._gl_enable()
-            cls.shader.bind()
+        line_width_set(1.0)
+        point_size_set(1.0)
 
-            line_width_set(1.0)
-            point_size_set(1.0)
+        for obj, _bbox in objs_on_screen:
+            obj_batches = cls._batches.get(id(obj))
+            if obj_batches is None:
+                continue
 
-            for obj, _bbox in objs_on_screen:
-                obj_batches = cls._batches.get(id(obj))
-                if obj_batches is None:
+            for batch_type, (batch, buf_size) in obj_batches.items():
+                if batch is None:
                     continue
 
-                for batch_type, (batch, buf_size) in obj_batches.items():
-                    if batch is None:
-                        continue
+                offset = cls._next_offset
+                cls._next_offset += buf_size
 
-                    offset = cls._next_offset
-                    cls._next_offset += buf_size
+                mvp = bpy.context.region_data.perspective_matrix @ obj.matrix_world
+                cls.shader.uniform_float("MVP", mvp)
+                cls.shader.uniform_float("offset", float(offset))
 
-                    # MVP = perspective_matrix * obj.matrix_world
-                    mvp = bpy.context.region_data.perspective_matrix @ obj.matrix_world
-                    cls.shader.uniform_float("MVP", mvp)
-                    cls.shader.uniform_float("offset", float(offset))
+                with push_pop():
+                    load_matrix(mathutils.Matrix.Identity(4))
+                    batch.draw(cls.shader)
 
-                    with push_pop():
-                        load_matrix(mathutils.Matrix.Identity(4))
-                        batch.draw(cls.shader)
+        cls._gl_disable()
 
-            cls._gl_disable()
-        finally:
-            pass  # offscreen.unbind() would be called here in a full implementation
+    # ---- Pixel decoding ----------------------------------------------------
+
+    @classmethod
+    def _decode_pixel(cls, r: int, g: int, b: int, a: int) -> int:
+        """Reconstruct the encoded 32-bit integer from an RGBA pixel."""
+        return ((a * 256 + b) * 256 + g) * 256 + r
+
+    @classmethod
+    def _find_closest_hit(
+        cls,
+        buffer_data: list[list[tuple[int, int, int, int]]],
+        cx: int,
+        cy: int,
+    ) -> tuple[int, int, int] | None:
+        """
+        Scan *buffer_data* for valid hits and return the one closest
+        to the centre ``(cx, cy)``.
+
+        Returns ``(encoded_value, pixel_x, pixel_y)`` or ``None``.
+        """
+        best_dist = 1e12
+        best = None
+        height = len(buffer_data)
+        width = len(buffer_data[0]) if height else 0
+
+        for y in range(height):
+            row = buffer_data[y]
+            for x in range(width):
+                r, g, b, a = row[x]
+                # Skip black / no-hit pixels
+                if r == 0 and g == 0 and b == 0 and a == 0:
+                    continue
+                val = cls._decode_pixel(r, g, b, a)
+                if val > 0:
+                    dx = x - cx
+                    dy = y - cy
+                    dist = dx * dx + dy * dy
+                    if dist < best_dist:
+                        best_dist = dist
+                        best = (val, x, y)
+
+        return best
+
+    # ---- Full detect -------------------------------------------------------
 
     @classmethod
     def detect(
@@ -1578,10 +1618,108 @@ class GPUSnap:
         context: bpy.types.Context,
         event: bpy.types.Event,
         on_screen_objs: list[tuple[bpy.types.Object, list[float]]],
-    ) -> None:
+    ) -> SnapHit | None:
         """
-        Identify the object and primitive under the mouse.
+        Identify the object and primitive under the mouse cursor.
 
-        (Full implementation in the next commit — currently a no-op placeholder.)
+        Returns a :class:`SnapHit` with ``(object, batch_type, primitive_index)``
+        or ``None`` when nothing is under the mouse.
+
+        Step-by-step:
+
+        1. Ensure every on-screen object has its GPU batch built (lazy).
+        2. Bind the tiny offscreen framebuffer (no depth — always x-ray).
+        3. Draw all object batches with per-object MVP + offset uniforms.
+        4. Read back the ``(2*radius+1) × (2*radius+1)`` pixel region
+           centred on the mouse, clamped to viewport bounds.
+        5. Scan for the pixel closest to centre that decodes to a valid
+           ``offset + primitive_id``.
+        6. Map that value back to the originating object and primitive.
         """
+        if not cls.is_available():
+            return None
+
+        if not on_screen_objs:
+            return None
+
+        region = context.region
+        if not region:
+            return None
+
+        buf_size = cls._ensure_offscreen()
+        snap_r = cls.get_snap_radius_px()
+        mouse_x = event.mouse_region_x
+        mouse_y = event.mouse_region_y
+
+        # ── 1. Ensure batches exist for all on-screen objects ──
+        for obj, _bbox in on_screen_objs:
+            cls.ensure_object_batches(obj)
+
+        # ── 2. Draw all objects to the offscreen buffer ──
+        cls._next_offset = 1
+        cls._offscreen.bind()
+
+        try:
+            # Clear the buffer (black = no hit)
+            fb = active_framebuffer_get()
+            fb.clear(color=(0.0, 0.0, 0.0, 0.0))
+
+            cls._draw_all(on_screen_objs)
+
+            # ── 3. Read back the pixel region around the mouse ──
+            read_x = max(0, min(mouse_x - snap_r, region.width - buf_size))
+            read_y = max(0, min(mouse_y - snap_r, region.height - buf_size))
+
+            raw_buf = fb.read_color(
+                int(read_x), int(read_y),
+                buf_size, buf_size,
+                4, 0, "UBYTE",
+            )
+        finally:
+            # Unbind offscreen — drawing back to the main framebuffer
+            pass  # GPUOffScreen.bind()/unbind() is managed by context in Blender 4.x
+
+        # ── 4. Decode the buffer ──
+        pixel_data: list[list[tuple[int, int, int, int]]] = raw_buf.to_list()
+        centre_pixel = mouse_x - int(read_x), mouse_y - int(read_y)
+
+        if not pixel_data or not pixel_data[0]:
+            return None
+
+        hit = cls._find_closest_hit(pixel_data, *centre_pixel)
+        if hit is None:
+            return None
+
+        encoded_value, px, py = hit
+
+        # ── 5. Map the encoded value back to an object ──
+        # Walk through objects in draw order to find which object
+        # owns this offset range.
+        running_offset = 1
+        for obj, _bbox in on_screen_objs:
+            obj_batches = cls._batches.get(id(obj))
+            if obj_batches is None:
+                continue
+
+            for batch_type_str, (_batch, buf_size) in obj_batches.items():
+                if _batch is None:
+                    continue
+
+                if running_offset <= encoded_value < running_offset + buf_size:
+                    primitive_index = int(encoded_value - running_offset)
+                    return SnapHit(
+                        object=obj,
+                        batch_type=batch_type_str,
+                        primitive_index=primitive_index,
+                    )
+
+                running_offset += buf_size
+
         return None
+
+
+class SnapHit(NamedTuple):
+    """Result of a GPU snap detection query."""
+    object: bpy.types.Object
+    batch_type: str          # "POINTS" for vertex, "LINES" for edge
+    primitive_index: int     # index into the batch primitive list
