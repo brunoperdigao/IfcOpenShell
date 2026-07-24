@@ -28,6 +28,8 @@ import numpy as np
 from bpy_extras import view3d_utils
 from mathutils import Vector
 
+import warnings
+
 import bonsai.core.tool
 import bonsai.tool as tool
 
@@ -982,6 +984,14 @@ class Raycast(bonsai.core.tool.Raycast):
 
     @classmethod
     def create_snap_obj(cls, obj):
+        """
+        .. deprecated::
+           Use :meth:`GPUSnap.ensure_object_batches` instead.
+        """
+        warnings.warn(
+            "create_snap_obj is deprecated, use GPUSnap.ensure_object_batches instead",
+            DeprecationWarning, stacklevel=2,
+        )
         if obj.data is None or not isinstance(obj.data, bpy.types.Mesh):
             return None
         for i, snap_obj in enumerate(cls.snap_objs):
@@ -1004,12 +1014,26 @@ class Raycast(bonsai.core.tool.Raycast):
 
     @classmethod
     def clear_snap_objs(cls):
+        """
+        .. deprecated::
+           Use :meth:`GPUSnap.invalidate_object` instead.
+        """
+        warnings.warn(
+            "clear_snap_objs is deprecated, use GPUSnap.invalidate_object instead",
+            DeprecationWarning, stacklevel=2,
+        )
         TreeNode.__clear_all__()
         SnapObj.__clear_all__()
         cls.snap_objs.clear()
 
 
 class TreeNode:
+    """
+    .. deprecated::
+       The custom edge-BVH is being replaced by the GPU-based
+       :class:`GPUSnap` pipeline. This class is kept for backward
+       compatibility and will be removed in a future commit.
+    """
     all = []
 
     def __init__(self, box: tuple):
@@ -1026,6 +1050,12 @@ class TreeNode:
 
 
 class SnapObj:
+    """
+    .. deprecated::
+       The custom edge-BVH is being replaced by the GPU-based
+       :class:`GPUSnap` pipeline. This class is kept for backward
+       compatibility and will be removed in a future commit.
+    """
     max_depth = 9
     all = []
 
@@ -1716,6 +1746,150 @@ class GPUSnap:
                 running_offset += buf_size
 
         return None
+
+    # ---- Hit-to-geometry helpers ------------------------------------------
+
+    @classmethod
+    def hit_world_coords(cls, hit: SnapHit) -> list[Vector]:
+        """
+        Return the world-space coordinate(s) for a GPU snap hit.
+
+        * POINTS → one vertex position.
+        * LINES → two vertex positions (the edge endpoints).
+        """
+        obj = hit.object
+        mw = obj.matrix_world
+
+        if hit.batch_type == "POINTS":
+            return [mw @ obj.data.vertices[hit.primitive_index].co]
+
+        elif hit.batch_type == "LINES":
+            # Each LINES primitive consumes 2 consecutive vertices in the batch.
+            # The batch is built from [e0v0, e0v1, e1v0, e1v1, ...], so:
+            vert_idx = hit.primitive_index * 2
+            if vert_idx + 1 >= len(obj.data.vertices):
+                return []
+            return [
+                mw @ obj.data.vertices[vert_idx].co,
+                mw @ obj.data.vertices[vert_idx + 1].co,
+            ]
+
+        return []
+
+    @classmethod
+    def hit_proximity_data(
+        cls,
+        context: bpy.types.Context,
+        event: bpy.types.Event,
+        hit: SnapHit,
+    ) -> list[dict]:
+        """
+        Convert a GPU :class:`SnapHit` into the same snap-point dict list
+        that :meth:`Raycast.ray_cast_by_proximity_2d` returns.
+
+        The result contains zero, one, or two entries depending on the
+        primitive type and proximity to the mouse:
+
+        * POINTS:
+            - ``{"type": "Vertex", "point": world_coord, "distance": px_dist, …}``
+        * LINES:
+            - ``{"type": "Vertex", …}`` (if close to an endpoint)
+            - ``{"type": "Edge Center", …}`` (if close to the middle)
+            - ``{"type": "Edge", …}`` (if anywhere on the edge)
+
+        Only entries whose pixel distance is within the snap radius are
+        returned (typically 0 or 1 entries for points, 0–3 for edges).
+        """
+        coords = cls.hit_world_coords(hit)
+        if not coords:
+            return []
+
+        region = context.region
+        rv3d = context.region_data
+        mouse_pos = Vector((event.mouse_region_x, event.mouse_region_y))
+        snap_r = cls.get_snap_radius_px()
+        snap_r_sq = snap_r * snap_r
+
+        result: list[dict] = []
+
+        if hit.batch_type == "POINTS":
+            pt = coords[0]
+            pt2d = view3d_utils.location_3d_to_region_2d(region, rv3d, pt)
+            if pt2d is not None:
+                dist = (mouse_pos - pt2d).length
+                if dist <= snap_r:
+                    result.append({
+                        "object": hit.object,
+                        "type": "Vertex",
+                        "point": pt,
+                        "distance": dist / 10,
+                    })
+
+        elif hit.batch_type == "LINES":
+            if len(coords) < 2:
+                return []
+            p0, p1 = coords[0], coords[1]
+            p0_2d = view3d_utils.location_3d_to_region_2d(region, rv3d, p0)
+            p1_2d = view3d_utils.location_3d_to_region_2d(region, rv3d, p1)
+            if p0_2d is None or p1_2d is None:
+                return []
+
+            # Project mouse onto the 2D segment
+            seg = p1_2d - p0_2d
+            seg_len_sq = seg.length_squared
+            if seg_len_sq > 0:
+                t = ((mouse_pos - p0_2d).dot(seg)) / seg_len_sq
+            else:
+                t = 0.0
+
+            t_clamped = max(0.0, min(1.0, t))
+
+            # Vertex endpoints (when close to t=0 or t=1)
+            for end_t, pt, pt2d in [(0.0, p0, p0_2d), (1.0, p1, p1_2d)]:
+                if t_clamped <= 0.25 or t_clamped >= 0.75:
+                    dist = (mouse_pos - pt2d).length
+                    if dist <= snap_r:
+                        result.append({
+                            "object": hit.object,
+                            "type": "Vertex",
+                            "point": pt,
+                            "distance": dist / 10,
+                        })
+
+            # Edge centre (when t is near 0.5)
+            if 0.25 < t_clamped < 0.75:
+                mid = (p0 + p1) * 0.5
+                mid_2d = (p0_2d + p1_2d) * 0.5
+                dist = (mouse_pos - mid_2d).length
+                if dist <= snap_r:
+                    result.append({
+                        "object": hit.object,
+                        "type": "Edge Center",
+                        "point": mid,
+                        "distance": dist,
+                    })
+
+            # Edge (anywhere on the segment)
+            if not result or any(r["type"] not in {"Vertex", "Edge Center"} for r in result):
+                closest_2d = p0_2d.lerp(p1_2d, t_clamped)
+                dist = (mouse_pos - closest_2d).length
+                if dist <= snap_r:
+                    if t_clamped >= 0.5:
+                        fac = 1.0 - t_clamped
+                        seg_coords = [p1, p0]
+                    else:
+                        fac = t_clamped
+                        seg_coords = [p0, p1]
+                    closest_3d = seg_coords[0].lerp(seg_coords[1], fac)
+                    result.append({
+                        "object": hit.object,
+                        "type": "Edge",
+                        "point": closest_3d,
+                        "edge_verts": (p0, p1),
+                        "distance": dist,
+                    })
+
+        return result
 
 
 class SnapHit(NamedTuple):
