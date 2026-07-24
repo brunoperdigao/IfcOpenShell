@@ -1728,9 +1728,8 @@ class GPUSnap:
 
         # ── 3. Draw all objects to the full-viewport offscreen buffer ──
         cls._next_offset = 1
-        cls._offscreen.bind()
 
-        try:
+        with cls._offscreen.bind():
             fb = active_framebuffer_get()
             fb.clear(color=(0.0, 0.0, 0.0, 0.0))
 
@@ -1746,8 +1745,6 @@ class GPUSnap:
                 read_size, read_size,
                 4, 0, "UBYTE",
             )
-        finally:
-            pass
 
         # ── 5. Decode the buffer ──
         pixel_data: list[list[tuple[int, int, int, int]]] = raw_buf.to_list()
