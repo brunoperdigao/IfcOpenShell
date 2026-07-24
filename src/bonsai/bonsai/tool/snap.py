@@ -410,7 +410,7 @@ class Snap(bonsai.core.tool.Snap):
                     )
                     if _hit is not None:
                         snap_point = {
-                            "point": Vector(_hit),
+                            "point": _hit,
                             "type": "Face",
                             "group": "Object",
                             "object": obj,
