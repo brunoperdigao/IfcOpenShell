@@ -51,6 +51,9 @@ except Exception:
 
 class Raycast(bonsai.core.tool.Raycast):
     offset = 10
+    # Cache for get_on_screen_2d_bounding_boxes: obj_id → (mat_sig, bbox_or_None)
+    _bbox_cache: dict[int, tuple[tuple[float, ...], tuple[float, float, float, float] | None]] = {}
+    _bbox_cache_view_sig: tuple[float, ...] | None = None
     mouse_offset = (
         (-offset, offset),
         (0, offset),
@@ -85,11 +88,41 @@ class Raycast(bonsai.core.tool.Raycast):
         return visible_objs
 
     @classmethod
+    @classmethod
+    def _view_signature(cls, context: bpy.types.Context) -> tuple[float, ...]:
+        """Return a hashable snapshot of the current view matrix."""
+        rv3d = context.region_data
+        if rv3d is None:
+            return ()
+        m = rv3d.view_matrix
+        return tuple(m[0]) + tuple(m[1]) + tuple(m[2]) + tuple(m[3]) + (rv3d.view_distance,)
+
+    @classmethod
+    def invalidate_bbox_cache(cls) -> None:
+        """Clear the 2D bounding box cache (call on view change or object change)."""
+        cls._bbox_cache.clear()
+        cls._bbox_cache_view_sig = None
+
+    @classmethod
     def get_on_screen_2d_bounding_boxes(
         cls, context: bpy.types.Context, obj: bpy.types.Object
     ) -> Union[tuple[bpy.types.Object, list[float]], None]:
         rv3d = context.region_data
         assert rv3d
+
+        # View-dirty cache: recompute only when the view matrix changes
+        sig = cls._view_signature(context)
+        if sig != cls._bbox_cache_view_sig:
+            cls._bbox_cache.clear()
+            cls._bbox_cache_view_sig = sig
+
+        obj_id = id(obj)
+        if obj_id in cls._bbox_cache:
+            cached = cls._bbox_cache[obj_id]
+            if cached is None:
+                return None
+            return (obj, list(cached))
+
         view_location = rv3d.view_matrix.inverted().translation
         view_normal = rv3d.view_rotation @ mathutils.Vector((0.0, 0.0, -1.0))
         obj_matrix = obj.matrix_world.copy()
@@ -114,6 +147,7 @@ class Raycast(bonsai.core.tool.Raycast):
                     min_distance = distance
                     closest_distance = distance
             if closest_distance > threshold:
+                cls._bbox_cache[obj_id] = (mat_sig, None)
                 return None
 
         for v in bbox:
@@ -147,6 +181,7 @@ class Raycast(bonsai.core.tool.Raycast):
             bbox_2d.extend([min_point, max_point])
 
         if len(bbox_2d) == 0:
+            cls._bbox_cache[obj_id] = (mat_sig, None)
             return None
         # AABB
         if (
@@ -155,7 +190,9 @@ class Raycast(bonsai.core.tool.Raycast):
             and bbox_2d[2] <= borders[3]
             and bbox_2d[3] >= borders[2]
         ):
+            cls._bbox_cache[obj_id] = (mat_sig, tuple(bbox_2d))
             return (obj, bbox_2d)
+        cls._bbox_cache[obj_id] = (mat_sig, None)
         return None
 
     def intersect_edge_region_border(region, space, rv3d, v1, v2):
