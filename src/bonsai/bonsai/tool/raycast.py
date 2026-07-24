@@ -28,8 +28,6 @@ import numpy as np
 from bpy_extras import view3d_utils
 from mathutils import Vector
 
-import warnings
-
 import bonsai.core.tool
 import bonsai.tool as tool
 
@@ -1938,3 +1936,7 @@ class SnapHit(NamedTuple):
     object: bpy.types.Object
     batch_type: str          # "POINTS" for vertex, "LINES" for edge
     primitive_index: int     # index into the batch primitive list
+
+
+# Expose GPUSnap on Raycast so callers can use tool.Raycast.GPUSnap
+Raycast.GPUSnap = GPUSnap
