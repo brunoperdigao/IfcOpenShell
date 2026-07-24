@@ -143,9 +143,20 @@ class Snap(bonsai.core.tool.Snap):
         except:
             snap_vertex = polyline_props.snap_mouse_point.add()
 
-        snap_vertex.x = snap_point[0]
-        snap_vertex.y = snap_point[1]
-        snap_vertex.z = snap_point[2]
+        # Guard: ensure snap_point is a proper 3D coordinate
+        try:
+            x, y, z = float(snap_point[0]), float(snap_point[1]), float(snap_point[2])
+        except (TypeError, IndexError, ValueError):
+            # Fallback: try converting to Vector first, or use origin
+            try:
+                v = Vector(snap_point)
+                x, y, z = v.x, v.y, v.z
+            except Exception:
+                x, y, z = 0.0, 0.0, 0.0
+
+        snap_vertex.x = x
+        snap_vertex.y = y
+        snap_vertex.z = z
         snap_vertex.snap_type = snap_type
         if snap_obj:
             snap_vertex.snap_object = snap_obj.name
@@ -165,9 +176,19 @@ class Snap(bonsai.core.tool.Snap):
         except:
             snap_vertex = polyline_props.snap_mouse_ref.add()
 
-        snap_vertex.x = snap_point[0]
-        snap_vertex.y = snap_point[1]
-        snap_vertex.z = snap_point[2]
+        # Guard: ensure snap_point is a proper 3D coordinate
+        try:
+            x, y, z = float(snap_point[0]), float(snap_point[1]), float(snap_point[2])
+        except (TypeError, IndexError, ValueError):
+            try:
+                v = Vector(snap_point)
+                x, y, z = v.x, v.y, v.z
+            except Exception:
+                x, y, z = 0.0, 0.0, 0.0
+
+        snap_vertex.x = x
+        snap_vertex.y = y
+        snap_vertex.z = z
         snap_vertex.snap_type = snap_type
 
     @classmethod
