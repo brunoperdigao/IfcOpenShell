@@ -147,14 +147,11 @@ class Snap(bonsai.core.tool.Snap):
         try:
             x, y, z = float(snap_point[0]), float(snap_point[1]), float(snap_point[2])
         except (TypeError, IndexError, ValueError):
-            print(f"⚠ update_snapping_point: invalid snap_point type={type(snap_point).__name__} repr={repr(snap_point)[:120]}")
             # Fallback: try converting to Vector first, or use origin
             try:
                 v = Vector(snap_point)
                 x, y, z = v.x, v.y, v.z
-                print(f"  → recovered via Vector(), got ({x:.3f}, {y:.3f}, {z:.3f})")
-            except Exception as e:
-                print(f"  → Vector() also failed: {e}, using (0,0,0)")
+            except Exception:
                 x, y, z = 0.0, 0.0, 0.0
 
         snap_vertex.x = x
@@ -183,13 +180,10 @@ class Snap(bonsai.core.tool.Snap):
         try:
             x, y, z = float(snap_point[0]), float(snap_point[1]), float(snap_point[2])
         except (TypeError, IndexError, ValueError):
-            print(f"⚠ update_snapping_ref: invalid snap_point type={type(snap_point).__name__} repr={repr(snap_point)[:120]}")
             try:
                 v = Vector(snap_point)
                 x, y, z = v.x, v.y, v.z
-                print(f"  → recovered via Vector()")
-            except Exception as e:
-                print(f"  → Vector() also failed: {e}, using (0,0,0)")
+            except Exception:
                 x, y, z = 0.0, 0.0, 0.0
 
         snap_vertex.x = x
@@ -416,48 +410,34 @@ class Snap(bonsai.core.tool.Snap):
                     point["group"] = "Measure"
                     detected_snaps.append(point)
 
-        # Objects — GPU path (debug)
+        # Objects — GPU-accelerated path
         if tool.Raycast.GPUSnap.is_available():
-            print("\n=== GPUSnap debug ===")
             gpu_hit = tool.Raycast.GPUSnap.detect(context, event, objs_2d_bbox)
-            print(f"gpu_hit = {gpu_hit}")
             if gpu_hit is not None:
-                print(f"  object={gpu_hit.object.name}, batch_type={gpu_hit.batch_type}, primitive_index={gpu_hit.primitive_index}")
-
                 snap_data = tool.Raycast.GPUSnap.hit_proximity_data(context, event, gpu_hit)
-                print(f"  snap_data ({len(snap_data)} items):")
-                for i, data in enumerate(snap_data):
-                    pt = data.get("point")
-                    print(f"    [{i}] type={data.get('type')} point_type={type(pt).__name__} point_repr={repr(pt)[:100]}")
+                for data in snap_data:
                     data["group"] = "Object"
                     if "point" in data:
-                        print(f"      → wrapping with Vector()...")
-                        try:
-                            data["point"] = Vector(data["point"])
-                            print(f"      → OK, now type={type(data['point']).__name__}")
-                        except Exception as e:
-                            print(f"      → FAILED: {e}")
+                        data["point"] = Vector(data["point"])
                     detected_snaps.append(data)
 
                 # If the object has faces, do a single ray_cast for face data
                 obj = gpu_hit.object
                 if obj.type == "MESH" and obj.data.polygons:
-                    _hit, _normal, _face_index = tool.Raycast.cast_rays_to_single_object(
+                    # cast_rays_to_single_object returns (object, hit_world, face_index)
+                    _hit_obj, _hit_loc, _face_index = tool.Raycast.cast_rays_to_single_object(
                         context, event, obj
                     )
-                    print(f"  ray_cast face: _hit={_hit} (type={type(_hit).__name__})")
-                    if _hit is not None:
+                    if _hit_loc is not None:
                         snap_point = {
-                            "point": _hit,
+                            "point": _hit_loc,
                             "type": "Face",
                             "group": "Object",
                             "object": obj,
                             "face_index": _face_index,
                             "distance": 9,
                         }
-                        print(f"    → point type={type(snap_point['point']).__name__}")
                         detected_snaps.append(snap_point)
-            print("=== GPUSnap debug end ===\n")
         else:
             # Fallback: CPU path
             objs_to_raycast = tool.Raycast.filter_objects_to_raycast(context, event, objs_2d_bbox)
