@@ -1576,10 +1576,6 @@ class GPUSnap:
             cls._batches.pop(id(obj), None)
         else:
             cls._batches.clear()
-        if cls._offscreen is not None:
-            del cls._offscreen
-            cls._offscreen = None
-            cls._offscreen_size = (0, 0)
         cls._next_offset = 1
 
     # ---- Drawing -----------------------------------------------------------
