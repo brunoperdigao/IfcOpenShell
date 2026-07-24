@@ -147,11 +147,14 @@ class Snap(bonsai.core.tool.Snap):
         try:
             x, y, z = float(snap_point[0]), float(snap_point[1]), float(snap_point[2])
         except (TypeError, IndexError, ValueError):
+            print(f"⚠ update_snapping_point: invalid snap_point type={type(snap_point).__name__} repr={repr(snap_point)[:120]}")
             # Fallback: try converting to Vector first, or use origin
             try:
                 v = Vector(snap_point)
                 x, y, z = v.x, v.y, v.z
-            except Exception:
+                print(f"  → recovered via Vector(), got ({x:.3f}, {y:.3f}, {z:.3f})")
+            except Exception as e:
+                print(f"  → Vector() also failed: {e}, using (0,0,0)")
                 x, y, z = 0.0, 0.0, 0.0
 
         snap_vertex.x = x
@@ -180,10 +183,13 @@ class Snap(bonsai.core.tool.Snap):
         try:
             x, y, z = float(snap_point[0]), float(snap_point[1]), float(snap_point[2])
         except (TypeError, IndexError, ValueError):
+            print(f"⚠ update_snapping_ref: invalid snap_point type={type(snap_point).__name__} repr={repr(snap_point)[:120]}")
             try:
                 v = Vector(snap_point)
                 x, y, z = v.x, v.y, v.z
-            except Exception:
+                print(f"  → recovered via Vector()")
+            except Exception as e:
+                print(f"  → Vector() also failed: {e}, using (0,0,0)")
                 x, y, z = 0.0, 0.0, 0.0
 
         snap_vertex.x = x
@@ -410,40 +416,81 @@ class Snap(bonsai.core.tool.Snap):
                     point["group"] = "Measure"
                     detected_snaps.append(point)
 
-        # Objects — CPU path
-        # TODO: Replace with GPUSnap GPU-accelerated path once the
-        #       bpy_struct point type issue is resolved.
-        objs_to_raycast = tool.Raycast.filter_objects_to_raycast(context, event, objs_2d_bbox)
-        closest_snaps = tool.Raycast.ray_cast_and_get_closest_to_camera_snaps(context, event, objs_to_raycast)
-        detected_snaps.extend(closest_snaps)
+        # Objects — GPU path (debug)
+        if tool.Raycast.GPUSnap.is_available():
+            print("\n=== GPUSnap debug ===")
+            gpu_hit = tool.Raycast.GPUSnap.detect(context, event, objs_2d_bbox)
+            print(f"gpu_hit = {gpu_hit}")
+            if gpu_hit is not None:
+                print(f"  object={gpu_hit.object.name}, batch_type={gpu_hit.batch_type}, primitive_index={gpu_hit.primitive_index}")
 
-        xray_mode = (space.shading.type == "SOLID" and space.shading.show_xray) or (
-            space.shading.type == "WIREFRAME" and space.shading.show_xray_wireframe
-        )
+                snap_data = tool.Raycast.GPUSnap.hit_proximity_data(context, event, gpu_hit)
+                print(f"  snap_data ({len(snap_data)} items):")
+                for i, data in enumerate(snap_data):
+                    pt = data.get("point")
+                    print(f"    [{i}] type={data.get('type')} point_type={type(pt).__name__} point_repr={repr(pt)[:100]}")
+                    data["group"] = "Object"
+                    if "point" in data:
+                        print(f"      → wrapping with Vector()...")
+                        try:
+                            data["point"] = Vector(data["point"])
+                            print(f"      → OK, now type={type(data['point']).__name__}")
+                        except Exception as e:
+                            print(f"      → FAILED: {e}")
+                    detected_snaps.append(data)
 
-        for snap_obj in objs_to_raycast:
-            for snap in closest_snaps:
-                if snap_obj.obj == snap["object"]:
-                    if xray_mode:
-                        if "face_index" in snap and snap["face_index"] is not None:
-                            snap_points = tool.Raycast.ray_cast_by_proximity_2d(context, event, snap_obj)
-                            for point in snap_points:
-                                point["group"] = "Object"
-                                detected_snaps.append(point)
-                    else:
-                        # If it is a solid object that is closest to camera it ignores all the rest
-                        if (
-                            "is_closest_to_camera" in snap
-                            and snap["is_closest_to_camera"]
-                            and snap["group"] == "Object"
-                        ):
-                            closest_snap = [snap]  # discards objects that aren't the closest
+                # If the object has faces, do a single ray_cast for face data
+                obj = gpu_hit.object
+                if obj.type == "MESH" and obj.data.polygons:
+                    _hit, _normal, _face_index = tool.Raycast.cast_rays_to_single_object(
+                        context, event, obj
+                    )
+                    print(f"  ray_cast face: _hit={_hit} (type={type(_hit).__name__})")
+                    if _hit is not None:
+                        snap_point = {
+                            "point": _hit,
+                            "type": "Face",
+                            "group": "Object",
+                            "object": obj,
+                            "face_index": _face_index,
+                            "distance": 9,
+                        }
+                        print(f"    → point type={type(snap_point['point']).__name__}")
+                        detected_snaps.append(snap_point)
+            print("=== GPUSnap debug end ===\n")
+        else:
+            # Fallback: CPU path
+            objs_to_raycast = tool.Raycast.filter_objects_to_raycast(context, event, objs_2d_bbox)
+            closest_snaps = tool.Raycast.ray_cast_and_get_closest_to_camera_snaps(context, event, objs_to_raycast)
+            detected_snaps.extend(closest_snaps)
+
+            xray_mode = (space.shading.type == "SOLID" and space.shading.show_xray) or (
+                space.shading.type == "WIREFRAME" and space.shading.show_xray_wireframe
+            )
+
+            for snap_obj in objs_to_raycast:
+                for snap in closest_snaps:
+                    if snap_obj.obj == snap["object"]:
+                        if xray_mode:
                             if "face_index" in snap and snap["face_index"] is not None:
                                 snap_points = tool.Raycast.ray_cast_by_proximity_2d(context, event, snap_obj)
                                 for point in snap_points:
                                     point["group"] = "Object"
-                                    closest_snap.append(point)
-                            detected_snaps = closest_snap
+                                    detected_snaps.append(point)
+                        else:
+                            # If it is a solid object that is closest to camera it ignores all the rest
+                            if (
+                                "is_closest_to_camera" in snap
+                                and snap["is_closest_to_camera"]
+                                and snap["group"] == "Object"
+                            ):
+                                closest_snap = [snap]  # discards objects that aren't the closest
+                                if "face_index" in snap and snap["face_index"] is not None:
+                                    snap_points = tool.Raycast.ray_cast_by_proximity_2d(context, event, snap_obj)
+                                    for point in snap_points:
+                                        point["group"] = "Object"
+                                        closest_snap.append(point)
+                                detected_snaps = closest_snap
 
         # snap to cut geometry (e.g. in plan view)
         if CutDecorator.installed:
