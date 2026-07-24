@@ -1344,7 +1344,7 @@ class GPUSnap:
     _next_offset = 1
     _available = None
     _offscreen: GPUOffScreen | None = None
-    _offscreen_size: int = 0
+    _offscreen_size: tuple[int, int] = (0, 0)
 
     @classmethod
     def is_available(cls) -> bool:
@@ -1424,38 +1424,32 @@ class GPUSnap:
 
     @classmethod
     def get_snap_radius_px(cls) -> int:
-        """
-        Return the snap radius in pixels.
-
-        This determines the half-size of the offscreen readback region.
-        The buffer will be ``(2 * radius + 1)`` pixels wide/tall.
-        """
-        # TODO: read from user preferences when available
+        """Return the half-size of the readback region in pixels."""
         return cls._SNAP_RADIUS_PX
-
-    @classmethod
-    def _compute_buffer_size(cls) -> int:
-        """Return the offscreen buffer size (width and height) in pixels."""
-        return 2 * cls.get_snap_radius_px() + 1
 
     # ---- Offscreen buffer --------------------------------------------------
 
     @classmethod
-    def _ensure_offscreen(cls) -> int:
+    def _ensure_offscreen(cls, context: bpy.types.Context) -> tuple[int, int]:
         """
-        Create or resize the offscreen framebuffer.
+        Create or resize the offscreen framebuffer to match the 3D view region.
 
-        Returns the current buffer size in pixels.
+        Returns ``(width, height)`` of the buffer.
         """
-        size = cls._compute_buffer_size()
-        if cls._offscreen is not None and cls._offscreen_size == size:
-            return size
+        region = context.region
+        if region is None:
+            return (0, 0)
+        w, h = region.width, region.height
+        if w < 1 or h < 1:
+            return (0, 0)
+        if cls._offscreen is not None and cls._offscreen_size == (w, h):
+            return (w, h)
         if cls._offscreen is not None:
             del cls._offscreen
             cls._offscreen = None
-        cls._offscreen = GPUOffScreen(size, size, format="RGBA8")
-        cls._offscreen_size = size
-        return size
+        cls._offscreen = GPUOffScreen(max(w, 1), max(h, 1), format="RGBA8")
+        cls._offscreen_size = (w, h)
+        return (w, h)
 
     # ---- Batch building ----------------------------------------------------
 
@@ -1580,6 +1574,10 @@ class GPUSnap:
             cls._batches.pop(id(obj), None)
         else:
             cls._batches.clear()
+        if cls._offscreen is not None:
+            del cls._offscreen
+            cls._offscreen = None
+            cls._offscreen_size = (0, 0)
         cls._next_offset = 1
 
     # ---- Drawing -----------------------------------------------------------
@@ -1717,7 +1715,6 @@ class GPUSnap:
         if not region:
             return None
 
-        buf_size = cls._ensure_offscreen()
         snap_r = cls.get_snap_radius_px()
         mouse_x = event.mouse_region_x
         mouse_y = event.mouse_region_y
@@ -1726,31 +1723,35 @@ class GPUSnap:
         for obj, _bbox in on_screen_objs:
             cls.ensure_object_batches(obj)
 
-        # ── 2. Draw all objects to the offscreen buffer ──
+        # ── 2. Create / resize offscreen buffer to match viewport ──
+        _buf_w, _buf_h = cls._ensure_offscreen(context)
+        if _buf_w < 1 or _buf_h < 1:
+            return None
+
+        # ── 3. Draw all objects to the full-viewport offscreen buffer ──
         cls._next_offset = 1
         cls._offscreen.bind()
 
         try:
-            # Clear the buffer (black = no hit)
             fb = active_framebuffer_get()
             fb.clear(color=(0.0, 0.0, 0.0, 0.0))
 
             cls._draw_all(context, on_screen_objs)
 
-            # ── 3. Read back the pixel region around the mouse ──
-            read_x = max(0, min(mouse_x - snap_r, region.width - buf_size))
-            read_y = max(0, min(mouse_y - snap_r, region.height - buf_size))
+            # ── 4. Read back a (2*snap_r+1)-pixel region around the mouse ──
+            read_size = 2 * snap_r + 1
+            read_x = max(0, min(mouse_x - snap_r, _buf_w - read_size))
+            read_y = max(0, min(mouse_y - snap_r, _buf_h - read_size))
 
             raw_buf = fb.read_color(
                 int(read_x), int(read_y),
-                buf_size, buf_size,
+                read_size, read_size,
                 4, 0, "UBYTE",
             )
         finally:
-            # Unbind offscreen — drawing back to the main framebuffer
-            pass  # GPUOffScreen.bind()/unbind() is managed by context in Blender 4.x
+            pass
 
-        # ── 4. Decode the buffer ──
+        # ── 5. Decode the buffer ──
         pixel_data: list[list[tuple[int, int, int, int]]] = raw_buf.to_list()
         centre_pixel = mouse_x - int(read_x), mouse_y - int(read_y)
 
