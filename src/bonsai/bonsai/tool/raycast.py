@@ -1025,10 +1025,10 @@ class Raycast(bonsai.core.tool.Raycast):
         .. deprecated::
            Use :meth:`GPUSnap.ensure_object_batches` instead.
         """
-        warnings.warn(
-            "create_snap_obj is deprecated, use GPUSnap.ensure_object_batches instead",
-            DeprecationWarning, stacklevel=2,
-        )
+        # warnings.warn(
+        #     "create_snap_obj is deprecated, use GPUSnap.ensure_object_batches instead",
+        #     DeprecationWarning, stacklevel=2,
+        # )
         if obj.data is None or not isinstance(obj.data, bpy.types.Mesh):
             return None
         for i, snap_obj in enumerate(cls.snap_objs):
@@ -1055,10 +1055,10 @@ class Raycast(bonsai.core.tool.Raycast):
         .. deprecated::
            Use :meth:`GPUSnap.invalidate_object` instead.
         """
-        warnings.warn(
-            "clear_snap_objs is deprecated, use GPUSnap.invalidate_object instead",
-            DeprecationWarning, stacklevel=2,
-        )
+        # warnings.warn(
+        #     "clear_snap_objs is deprecated, use GPUSnap.invalidate_object instead",
+        #     DeprecationWarning, stacklevel=2,
+        # )
         TreeNode.__clear_all__()
         SnapObj.__clear_all__()
         cls.snap_objs.clear()
@@ -1806,14 +1806,11 @@ class GPUSnap:
             return [mw @ obj.data.vertices[hit.primitive_index].co]
 
         elif hit.batch_type == "LINES":
-            # Each LINES primitive consumes 2 consecutive vertices in the batch.
-            # The batch is built from [e0v0, e0v1, e1v0, e1v1, ...], so:
-            vert_idx = hit.primitive_index * 2
-            if vert_idx + 1 >= len(obj.data.vertices):
-                return []
+            # primitive_index is the edge index into obj.data.edges
+            edge = obj.data.edges[hit.primitive_index]
             return [
-                mw @ obj.data.vertices[vert_idx].co,
-                mw @ obj.data.vertices[vert_idx + 1].co,
+                mw @ obj.data.vertices[edge.vertices[0]].co,
+                mw @ obj.data.vertices[edge.vertices[1]].co,
             ]
 
         return []

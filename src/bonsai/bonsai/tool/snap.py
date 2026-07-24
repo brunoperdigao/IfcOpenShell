@@ -397,6 +397,9 @@ class Snap(bonsai.core.tool.Snap):
                 snap_data = tool.Raycast.GPUSnap.hit_proximity_data(context, event, gpu_hit)
                 for data in snap_data:
                     data["group"] = "Object"
+                    # Ensure point is always a proper Vector
+                    if "point" in data:
+                        data["point"] = Vector(data["point"])
                     detected_snaps.append(data)
 
                 # If the object has faces, do a single ray_cast for face data
@@ -405,9 +408,9 @@ class Snap(bonsai.core.tool.Snap):
                     _hit, _normal, face_index = tool.Raycast.cast_rays_to_single_object(
                         context, event, obj
                     )
-                    if _hit:
+                    if _hit is not None:
                         snap_point = {
-                            "point": _hit,
+                            "point": Vector(_hit),
                             "type": "Face",
                             "group": "Object",
                             "object": obj,
