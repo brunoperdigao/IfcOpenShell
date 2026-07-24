@@ -32,13 +32,15 @@ import bonsai.core.tool
 import bonsai.tool as tool
 
 try:
-    from gpu.shader import create_from_info, GPUShaderCreateInfo, GPUStageInterfaceInfo
+    from gpu.shader import create_from_info
     from gpu.types import (
         GPUVertFormat,
         GPUVertBuf,
         GPUIndexBuf,
         GPUBatch,
         GPUOffScreen,
+        GPUShaderCreateInfo,
+        GPUStageInterfaceInfo,
     )
     from gpu.state import depth_mask_set, blend_set, line_width_set, point_size_set, active_framebuffer_get
     from gpu.matrix import push_pop, load_matrix
