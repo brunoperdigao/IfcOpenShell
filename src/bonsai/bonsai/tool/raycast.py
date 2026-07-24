@@ -31,6 +31,21 @@ from mathutils import Vector
 import bonsai.core.tool
 import bonsai.tool as tool
 
+try:
+    from gpu.shader import create_from_info, GPUShaderCreateInfo, GPUStageInterfaceInfo
+    from gpu.types import (
+        GPUVertFormat,
+        GPUVertBuf,
+        GPUIndexBuf,
+        GPUBatch,
+        GPUOffScreen,
+    )
+    from gpu.state import depth_mask_set, blend_set, line_width_set, point_size_set, active_framebuffer_get
+    from gpu.matrix import push_pop, load_matrix
+    _HAS_GPU = True
+except Exception:
+    _HAS_GPU = False
+
 
 class Raycast(bonsai.core.tool.Raycast):
     offset = 10
@@ -1241,3 +1256,332 @@ class SnapObj:
             intersected = self.raycast_boxes(context, event, node.child_b, intersected, rays)
 
         return intersected
+
+
+class GPUSnap:
+    """
+    GPU-accelerated primitive identification for snapping.
+
+    Renders objects to a tiny offscreen framebuffer using a custom shader
+    that encodes each primitive (vertex or edge) as a unique RGBA color.
+    Reading back the pixel under the mouse yields the exact object and
+    primitive under the cursor, bypassing per-object CPU ray_cast for
+    the "what's under the mouse" query.
+
+    Intended to replace the custom edge-BVH (SnapObj/TreeNode) pipeline.
+    """
+
+    shader = None
+    vert_format = None
+    _batches: dict[int, dict[str, tuple[GPUBatch, int]]] = {}
+    _next_offset = 1
+    _available = None
+    _offscreen: GPUOffScreen | None = None
+    _offscreen_size: int = 0
+
+    @classmethod
+    def is_available(cls) -> bool:
+        """Return True when GPU offscreen rendering is usable."""
+        if cls._available is None:
+            if bpy.app.background:
+                cls._available = False
+            elif not _HAS_GPU:
+                cls._available = False
+            else:
+                try:
+                    test = GPUOffScreen(1, 1, format="RGBA8")
+                    del test
+                    cls._available = True
+                except Exception:
+                    cls._available = False
+        return cls._available
+
+    # ---- Shader ------------------------------------------------------------
+
+    @classmethod
+    def _ensure_shader(cls) -> None:
+        """Compile the custom ID-encoding shader once."""
+        if cls.shader is not None:
+            return
+
+        vert_out = GPUStageInterfaceInfo("primitive_interface")
+        vert_out.flat("FLOAT", "primitive_id_var")
+
+        shader_info = GPUShaderCreateInfo()
+        shader_info.push_constant("MAT4", "MVP")
+        shader_info.push_constant("FLOAT", "offset")
+        shader_info.vertex_in(0, "VEC3", "pos")
+        shader_info.vertex_in(1, "FLOAT", "primitive_id")
+        shader_info.vertex_out(vert_out)
+        shader_info.fragment_out(0, "VEC4", "FragColor")
+        shader_info.vertex_source(
+            "void main()"
+            "{"
+            "  primitive_id_var = primitive_id;"
+            "  gl_Position = MVP * vec4(pos, 1.0);"
+            "}"
+        )
+        shader_info.fragment_source(
+            "vec4 cast_to_4_bytes(float f)"
+            "{"
+            "    vec4 color;"
+            "    color.r = float(int(f)%256);"
+            "    color.g = float(int(f/256)%256);"
+            "    color.b = float(int(f/65536)%256);"
+            "    color.a = float(int(f/16581376)%256);"
+            "    return color / 255.0;"
+            "}"
+            "void main()"
+            "{"
+            "  FragColor = cast_to_4_bytes(offset + primitive_id_var);"
+            "}"
+        )
+        cls.shader = create_from_info(shader_info)
+        del shader_info, vert_out
+
+    # ---- Vertex format -----------------------------------------------------
+
+    @classmethod
+    def _ensure_vert_format(cls) -> None:
+        """Create the (pos, primitive_id) vertex format once."""
+        if cls.vert_format is not None:
+            return
+        fmt = GPUVertFormat()
+        fmt.attr_add(id="pos", comp_type="F32", len=3, fetch_mode="FLOAT")
+        fmt.attr_add(id="primitive_id", comp_type="F32", len=1, fetch_mode="FLOAT")
+        cls.vert_format = fmt
+
+    # ---- Snap radius & offscreen buffer size ------------------------------
+
+    _SNAP_RADIUS_PX = 10  # default snap radius in pixels; matches ray_cast_by_proximity_2d
+
+    @classmethod
+    def get_snap_radius_px(cls) -> int:
+        """
+        Return the snap radius in pixels.
+
+        This determines the half-size of the offscreen readback region.
+        The buffer will be ``(2 * radius + 1)`` pixels wide/tall.
+        """
+        # TODO: read from user preferences when available
+        return cls._SNAP_RADIUS_PX
+
+    @classmethod
+    def _compute_buffer_size(cls) -> int:
+        """Return the offscreen buffer size (width and height) in pixels."""
+        return 2 * cls.get_snap_radius_px() + 1
+
+    # ---- Offscreen buffer --------------------------------------------------
+
+    @classmethod
+    def _ensure_offscreen(cls) -> int:
+        """
+        Create or resize the offscreen framebuffer.
+
+        Returns the current buffer size in pixels.
+        """
+        size = cls._compute_buffer_size()
+        if cls._offscreen is not None and cls._offscreen_size == size:
+            return size
+        if cls._offscreen is not None:
+            del cls._offscreen
+            cls._offscreen = None
+        cls._offscreen = GPUOffScreen(size, size, format="RGBA8")
+        cls._offscreen_size = size
+        return size
+
+    # ---- Batch building ----------------------------------------------------
+
+    @classmethod
+    def _build_batch(
+        cls,
+        coords: list[Vector],
+        batch_type: str,
+        indices: list | None = None,
+    ) -> tuple[GPUBatch, int]:
+        """
+        Build a GPU batch from coordinate data.
+
+        Args:
+            coords: list of world-space positions.
+            batch_type: ``'POINTS'`` or ``'LINES'``.
+            indices: explicit index list; auto-generated when ``None``.
+        Returns:
+            ``(GPUBatch, primitive_count)``.
+        """
+        cls._ensure_vert_format()
+
+        n_verts = len(coords)
+
+        if indices is None:
+            if batch_type == "POINTS":
+                idx_seq: list = list(range(n_verts))
+                n_primitives = n_verts
+            elif batch_type == "LINES":
+                idx_seq = [(i, i + 1) for i in range(0, n_verts, 2)]
+                n_primitives = len(idx_seq)
+            else:
+                raise ValueError(f"Unsupported batch type: {batch_type}")
+        else:
+            idx_seq = indices
+            n_primitives = len(idx_seq)
+
+        # Per-primitive ID: each vertex (POINTS) or each line (LINES)
+        # gets a unique sequential integer.
+        if batch_type == "POINTS":
+            prim_id_data = np.arange(n_primitives, dtype="f4").tolist()
+        elif batch_type == "LINES":
+            prim_id_data = np.repeat(np.arange(n_primitives, dtype="f4"), 2).tolist()
+        else:
+            prim_id_data = [0.0] * n_verts
+
+        vbo = GPUVertBuf(len=n_verts, format=cls.vert_format)
+        vbo.attr_fill(id="pos", data=[(v.x, v.y, v.z) for v in coords])
+        vbo.attr_fill(id="primitive_id", data=prim_id_data)
+
+        ibo = GPUIndexBuf(type=batch_type, seq=idx_seq)
+        batch = GPUBatch(type=batch_type, buf=vbo, elem=ibo)
+
+        return batch, n_primitives
+
+    # ---- Object batches ----------------------------------------------------
+
+    @classmethod
+    def _point_coords(cls, obj: bpy.types.Object) -> list[Vector]:
+        """Return vertex positions for a mesh object in world space."""
+        mw = obj.matrix_world
+        return [mw @ v.co for v in obj.data.vertices]
+
+    @classmethod
+    def _edge_coords(cls, obj: bpy.types.Object) -> list[Vector]:
+        """Return edge vertex pairs for a mesh object in world space, flattened."""
+        verts_3d = cls._point_coords(obj)
+        coords: list[Vector] = []
+        for e in obj.data.edges:
+            coords.append(verts_3d[e.vertices[0]])
+            coords.append(verts_3d[e.vertices[1]])
+        return coords
+
+    @classmethod
+    def ensure_object_batches(cls, obj: bpy.types.Object) -> bool:
+        """
+        Build GPU batches for *obj* if not already cached.
+
+        Returns ``True`` when the object has drawable geometry, ``False``
+        otherwise (unsupported type, no data, no vertices, …).
+        """
+        if id(obj) in cls._batches:
+            return True
+
+        if obj.type not in {"MESH", "CURVE"} or obj.data is None:
+            return False
+
+        batches: dict[str, tuple[GPUBatch, int]] = {}
+        ok = False
+
+        if obj.type == "MESH":
+            if len(obj.data.vertices) == 0:
+                return False
+
+            # POINTS — all vertices
+            pts = cls._point_coords(obj)
+            batch, n = cls._build_batch(pts, "POINTS")
+            batches["POINTS"] = (batch, n)
+            ok = True
+
+            # LINES — all edges (including non-wire)
+            if len(obj.data.edges) > 0:
+                edge_pts = cls._edge_coords(obj)
+                batch, n = cls._build_batch(edge_pts, "LINES")
+                batches["LINES"] = (batch, n)
+
+        # TODO: CURVE support deferred — curves are less common in IFC
+        # snapping and can still use the CPU path for now.
+
+        if not ok:
+            return False
+
+        cls._batches[id(obj)] = batches
+        return True
+
+    @classmethod
+    def invalidate_object(cls, obj: bpy.types.Object | None = None) -> None:
+        """
+        Remove cached GPU data for *obj*, or for all objects when *obj* is ``None``.
+        """
+        if obj is not None:
+            cls._batches.pop(id(obj), None)
+        else:
+            cls._batches.clear()
+        cls._next_offset = 1
+
+    # ---- Drawing -----------------------------------------------------------
+
+    @classmethod
+    def _gl_enable(cls) -> None:
+        depth_mask_set(False)
+        blend_set("NONE")
+
+    @classmethod
+    def _gl_disable(cls) -> None:
+        blend_set("NONE")
+
+    @classmethod
+    def _draw_batches(cls, objs_on_screen: list[tuple[bpy.types.Object, list[float]]]) -> None:
+        """
+        Draw all cached object batches into the offscreen buffer.
+
+        Each object receives a unique *offset* so that the decoded pixel
+        value unambiguously identifies both the object and the primitive.
+        """
+        cls._ensure_shader()
+        cls._ensure_offscreen()
+
+        cls._next_offset = 1
+        cls._offscreen.bind()
+
+        try:
+            cls._gl_enable()
+            cls.shader.bind()
+
+            line_width_set(1.0)
+            point_size_set(1.0)
+
+            for obj, _bbox in objs_on_screen:
+                obj_batches = cls._batches.get(id(obj))
+                if obj_batches is None:
+                    continue
+
+                for batch_type, (batch, buf_size) in obj_batches.items():
+                    if batch is None:
+                        continue
+
+                    offset = cls._next_offset
+                    cls._next_offset += buf_size
+
+                    # MVP = perspective_matrix * obj.matrix_world
+                    mvp = bpy.context.region_data.perspective_matrix @ obj.matrix_world
+                    cls.shader.uniform_float("MVP", mvp)
+                    cls.shader.uniform_float("offset", float(offset))
+
+                    with push_pop():
+                        load_matrix(mathutils.Matrix.Identity(4))
+                        batch.draw(cls.shader)
+
+            cls._gl_disable()
+        finally:
+            pass  # offscreen.unbind() would be called here in a full implementation
+
+    @classmethod
+    def detect(
+        cls,
+        context: bpy.types.Context,
+        event: bpy.types.Event,
+        on_screen_objs: list[tuple[bpy.types.Object, list[float]]],
+    ) -> None:
+        """
+        Identify the object and primitive under the mouse.
+
+        (Full implementation in the next commit — currently a no-op placeholder.)
+        """
+        return None
