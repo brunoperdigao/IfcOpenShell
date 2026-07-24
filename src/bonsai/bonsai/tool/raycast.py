@@ -1559,6 +1559,7 @@ class GPUSnap:
     @classmethod
     def _draw_all(
         cls,
+        context: bpy.types.Context,
         objs_on_screen: list[tuple[bpy.types.Object, list[float]]],
     ) -> None:
         """
@@ -1568,6 +1569,9 @@ class GPUSnap:
         value unambiguously identifies both the object and the primitive.
         """
         cls._ensure_shader()
+
+        rv3d = context.region_data
+        assert rv3d
 
         cls._gl_enable()
         cls.shader.bind()
@@ -1587,7 +1591,7 @@ class GPUSnap:
                 offset = cls._next_offset
                 cls._next_offset += buf_size
 
-                mvp = bpy.context.region_data.perspective_matrix @ obj.matrix_world
+                mvp = rv3d.perspective_matrix @ obj.matrix_world
                 cls.shader.uniform_float("MVP", mvp)
                 cls.shader.uniform_float("offset", float(offset))
 
@@ -1694,7 +1698,7 @@ class GPUSnap:
             fb = active_framebuffer_get()
             fb.clear(color=(0.0, 0.0, 0.0, 0.0))
 
-            cls._draw_all(on_screen_objs)
+            cls._draw_all(context, on_screen_objs)
 
             # ── 3. Read back the pixel region around the mouse ──
             read_x = max(0, min(mouse_x - snap_r, region.width - buf_size))
