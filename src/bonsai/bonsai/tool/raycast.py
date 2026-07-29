@@ -1740,11 +1740,24 @@ class GPUSnap:
         # ── 3. Draw all objects to the full-viewport offscreen buffer ──
         cls._next_offset = 1
 
+        # Sort objects front-to-back (closest last, so it overwrites farther ones)
+        # Without a depth buffer, draw order determines visibility
+        rv3d = context.region_data
+        if rv3d is not None:
+            cam_pos = rv3d.view_matrix.inverted().translation
+            sorted_objs = sorted(
+                on_screen_objs,
+                key=lambda item: (item[0].matrix_world.translation - cam_pos).length_squared,
+                reverse=True,  # farthest first → closest last → wins
+            )
+        else:
+            sorted_objs = on_screen_objs
+
         with cls._offscreen.bind():
             fb = active_framebuffer_get()
             fb.clear(color=(0.0, 0.0, 0.0, 0.0))
 
-            cls._draw_all(context, on_screen_objs)
+            cls._draw_all(context, sorted_objs)
 
             # ── 4. Read back a (2*snap_r+1)-pixel region around the mouse ──
             read_size = 2 * snap_r + 1
@@ -1782,7 +1795,7 @@ class GPUSnap:
         # Walk through objects in draw order to find which object
         # owns this offset range.
         running_offset = 1
-        for obj, _bbox in on_screen_objs:
+        for obj, _bbox in sorted_objs:
             obj_batches = cls._batches.get(id(obj))
             if obj_batches is None:
                 continue
@@ -1886,8 +1899,29 @@ class GPUSnap:
             p0, p1 = coords[0], coords[1]
             p0_2d = view3d_utils.location_3d_to_region_2d(region, rv3d, p0)
             p1_2d = view3d_utils.location_3d_to_region_2d(region, rv3d, p1)
-            if p0_2d is None or p1_2d is None:
+            if p0_2d is None and p1_2d is None:
                 return []
+            # If one endpoint is behind camera, use the visible one as a point snap
+            if p0_2d is None and p1_2d is not None:
+                dist = (mouse_pos - p1_2d).length
+                if dist <= snap_r:
+                    result.append({
+                        "object": hit.object,
+                        "type": "Vertex",
+                        "point": p1,
+                        "distance": dist / 10,
+                    })
+                return result
+            if p0_2d is not None and p1_2d is None:
+                dist = (mouse_pos - p0_2d).length
+                if dist <= snap_r:
+                    result.append({
+                        "object": hit.object,
+                        "type": "Vertex",
+                        "point": p0,
+                        "distance": dist / 10,
+                    })
+                return result
 
             # Project mouse onto the 2D segment
             seg = p1_2d - p0_2d
