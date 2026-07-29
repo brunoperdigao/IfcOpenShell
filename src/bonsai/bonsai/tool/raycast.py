@@ -1612,6 +1612,7 @@ class GPUSnap:
         line_width_set(1.0)
         point_size_set(1.0)
 
+        n_drawn = 0
         for obj, _bbox in objs_on_screen:
             obj_batches = cls._batches.get(id(obj))
             if obj_batches is None:
@@ -1631,6 +1632,10 @@ class GPUSnap:
                 with push_pop():
                     load_matrix(mathutils.Matrix.Identity(4))
                     batch.draw(cls.shader)
+                n_drawn += 1
+
+        print(f"[GPUSnap] _draw_all: drew {n_drawn} batches for {len(objs_on_screen)} objects")
+
 
         cls._gl_disable()
 
@@ -1718,12 +1723,16 @@ class GPUSnap:
         mouse_y = event.mouse_region_y
 
         # ── 1. Ensure batches exist for all on-screen objects ──
+        n_built = 0
         for obj, _bbox in on_screen_objs:
-            cls.ensure_object_batches(obj)
+            if cls.ensure_object_batches(obj):
+                n_built += 1
+        print(f"[GPUSnap] on_screen={len(on_screen_objs)} batches={len(cls._batches)} n_built={n_built}")
 
         # ── 2. Create / resize offscreen buffer to match viewport ──
         _buf_w, _buf_h = cls._ensure_offscreen(context)
         if _buf_w < 1 or _buf_h < 1:
+            print(f"[GPUSnap] offscreen too small: {_buf_w}x{_buf_h}")
             return None
 
         # ── 3. Draw all objects to the full-viewport offscreen buffer ──
@@ -1740,6 +1749,8 @@ class GPUSnap:
             read_x = max(0, min(mouse_x - snap_r, _buf_w - read_size))
             read_y = max(0, min(mouse_y - snap_r, _buf_h - read_size))
 
+            print(f"[GPUSnap] mouse=({mouse_x},{mouse_y}) buf={_buf_w}x{_buf_h} read_pos=({read_x},{read_y}) read_size={read_size}")
+
             raw_buf = fb.read_color(
                 int(read_x), int(read_y),
                 read_size, read_size,
@@ -1751,13 +1762,19 @@ class GPUSnap:
         centre_pixel = mouse_x - int(read_x), mouse_y - int(read_y)
 
         if not pixel_data or not pixel_data[0]:
+            print(f"[GPUSnap] pixel_data empty")
             return None
+
+        n_nonzero = sum(1 for row in pixel_data for px in row if any(c != 0 for c in px))
+        print(f"[GPUSnap] buffer={len(pixel_data)}x{len(pixel_data[0])} non_zero_pixels={n_nonzero}")
 
         hit = cls._find_closest_hit(pixel_data, *centre_pixel)
         if hit is None:
+            print(f"[GPUSnap] no valid hit in {n_nonzero} non-zero pixels")
             return None
 
         encoded_value, px, py = hit
+        print(f"[GPUSnap] HIT! encoded={encoded_value} at pixel=({px},{py})")
 
         # ── 5. Map the encoded value back to an object ──
         # Walk through objects in draw order to find which object
@@ -1774,6 +1791,7 @@ class GPUSnap:
 
                 if running_offset <= encoded_value < running_offset + buf_size:
                     primitive_index = int(encoded_value - running_offset)
+                    print(f"[GPUSnap] → {obj.name} {batch_type_str}[{primitive_index}]")
                     return SnapHit(
                         object=obj,
                         batch_type=batch_type_str,
@@ -1782,6 +1800,7 @@ class GPUSnap:
 
                 running_offset += buf_size
 
+        print(f"[GPUSnap] encoded={encoded_value} matched NO object (total_offset={running_offset})")
         return None
 
     # ---- Hit-to-geometry helpers ------------------------------------------
