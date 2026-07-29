@@ -42,7 +42,7 @@ try:
         GPUShaderCreateInfo,
         GPUStageInterfaceInfo,
     )
-    from gpu.state import depth_mask_set, blend_set, line_width_set, point_size_set, active_framebuffer_get, finish
+    from gpu.state import depth_mask_set, blend_set, line_width_set, point_size_set, active_framebuffer_get
     from gpu.matrix import push_pop, load_matrix
     _HAS_GPU = True
 except Exception:
@@ -1721,6 +1721,8 @@ class GPUSnap:
         snap_r = cls.get_snap_radius_px()
         mouse_x = event.mouse_region_x
         mouse_y = event.mouse_region_y
+        # OpenGL framebuffer has (0,0) at bottom-left, Blender region has (0,0) at top-left
+        gl_y = _buf_h - mouse_y if _buf_h > 0 else mouse_y
 
         # ── 1. Ensure batches exist for all on-screen objects ──
         n_built = 0
@@ -1743,12 +1745,11 @@ class GPUSnap:
             fb.clear(color=(0.0, 0.0, 0.0, 0.0))
 
             cls._draw_all(context, on_screen_objs)
-            finish()  # ensure drawing is complete before readback
 
             # ── 4. Read back a (2*snap_r+1)-pixel region around the mouse ──
             read_size = 2 * snap_r + 1
             read_x = max(0, min(mouse_x - snap_r, _buf_w - read_size))
-            read_y = max(0, min(mouse_y - snap_r, _buf_h - read_size))
+            read_y = max(0, min(gl_y - snap_r, _buf_h - read_size))
 
             print(f"[GPUSnap] mouse=({mouse_x},{mouse_y}) buf={_buf_w}x{_buf_h} read_pos=({read_x},{read_y}) read_size={read_size}")
 
@@ -1760,7 +1761,7 @@ class GPUSnap:
 
         # ── 5. Decode the buffer ──
         pixel_data: list[list[tuple[int, int, int, int]]] = raw_buf.to_list()
-        centre_pixel = mouse_x - int(read_x), mouse_y - int(read_y)
+        centre_pixel = mouse_x - int(read_x), gl_y - int(read_y)
 
         if not pixel_data or not pixel_data[0]:
             print(f"[GPUSnap] pixel_data empty")
