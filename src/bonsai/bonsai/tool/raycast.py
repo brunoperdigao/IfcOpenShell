@@ -42,7 +42,7 @@ try:
         GPUShaderCreateInfo,
         GPUStageInterfaceInfo,
     )
-    from gpu.state import depth_mask_set, blend_set, line_width_set, point_size_set, active_framebuffer_get
+    from gpu.state import depth_mask_set, depth_test_set, blend_set, line_width_set, point_size_set, active_framebuffer_get
     from gpu.matrix import push_pop, load_matrix
     _HAS_GPU = True
 except Exception:
@@ -1526,6 +1526,58 @@ class GPUSnap:
         return coords
 
     @classmethod
+    def _tri_data(cls, obj: bpy.types.Object) -> tuple[list[Vector], list[tuple[int, int, int]]] | None:
+        """Return (world-space vertices, triangle-index tuples) for *obj*.
+
+        Uses the **evaluated** mesh so modifiers (boolean, subdiv, etc.)
+        are reflected — important for IFC Boolean operations on walls/slabs.
+        """
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        eval_obj = obj.evaluated_get(depsgraph)
+        mesh = eval_obj.to_mesh()
+        if not mesh or not mesh.vertices:
+            if mesh:
+                eval_obj.to_mesh_clear()
+            return None
+
+        # Triangulate for GPU rasterization
+        mesh.calc_loop_triangles()
+        loop_tris = mesh.loop_triangles
+        if not loop_tris:
+            eval_obj.to_mesh_clear()
+            return None
+
+        mw = obj.matrix_world
+        verts = [mw @ v.co for v in mesh.vertices]
+        tris = [tri.vertices for tri in loop_tris]  # each is (v0, v1, v2)
+
+        eval_obj.to_mesh_clear()
+        return verts, tris
+
+    @classmethod
+    def _build_tri_batch(cls, obj: bpy.types.Object) -> GPUBatch | None:
+        """Build a single TRIS batch for object-level detection.
+
+        All triangles of the object share ``primitive_id = 0`` — the
+        ``offset`` uniform distinguishes objects. This is the same
+        technique as ``gpu_snap_test.py``.
+        """
+        tri_data = cls._tri_data(obj)
+        if tri_data is None:
+            return None
+        verts, tris = tri_data
+
+        cls._ensure_vert_format()
+        n_verts = len(verts)
+        vbo = GPUVertBuf(len=n_verts, format=cls.vert_format)
+        vbo.attr_fill(id="pos", data=[(v.x, v.y, v.z) for v in verts])
+        vbo.attr_fill(id="primitive_id", data=[0.0] * n_verts)
+
+        ibo = GPUIndexBuf(type="TRIS", seq=tris)
+        batch = GPUBatch(type="TRIS", buf=vbo, elem=ibo)
+        return batch
+
+    @classmethod
     def ensure_object_batches(cls, obj: bpy.types.Object) -> bool:
         """
         Build GPU batches for *obj* if not already cached.
@@ -1581,12 +1633,25 @@ class GPUSnap:
     # ---- Drawing -----------------------------------------------------------
 
     @classmethod
-    def _gl_enable(cls) -> None:
-        depth_mask_set(False)
+    def _gl_enable(cls, *, depth: bool = False) -> None:
+        """Set GL state for drawing.
+
+        Args:
+            depth: When True, enable depth testing (for TRIS/surface drawing).
+                   When False, disable depth (for POINTS/LINES overlay).
+        """
+        if depth:
+            depth_mask_set(True)
+            depth_test_set("LESS_EQUAL")
+        else:
+            depth_mask_set(False)
+            depth_test_set("NONE")
         blend_set("NONE")
 
     @classmethod
     def _gl_disable(cls) -> None:
+        depth_mask_set(True)   # restore default
+        depth_test_set("NONE")
         blend_set("NONE")
 
     @classmethod
@@ -1638,6 +1703,114 @@ class GPUSnap:
 
 
         cls._gl_disable()
+
+    # ---- Object-level detection (surface TRIS) -----------------------------
+
+    @classmethod
+    def detect_object(
+        cls,
+        context: bpy.types.Context,
+        event: bpy.types.Event,
+        on_screen_objs: list[tuple[bpy.types.Object, list[float]]],
+    ) -> bpy.types.Object | None:
+        """Identify which object's **surface** is under the mouse cursor.
+
+        Renders every on-screen object as filled triangles (evaluated mesh,
+        with modifiers) into the offscreen buffer using **depth testing**,
+        then reads a single pixel at the cursor position. This catches
+        situations where the mouse is over a face but not near any vertex
+        or edge — something the POINTS/LINES-only approach misses.
+
+        Returns the :class:`bpy.types.Object` or ``None``.
+
+        .. note::
+
+            This is the same technique as ``gpu_snap_test.py`` — unlit
+            flat-colour shader with per-object unique offset, depth testing
+            (``LESS_EQUAL``) for correct occlusion, and a single-pixel
+            readback.
+        """
+        if not on_screen_objs:
+            return None
+
+        region = context.region
+        if not region:
+            return None
+
+        w, h = region.width, region.height
+        if w < 1 or h < 1:
+            return None
+
+        mouse_x = int(event.mouse_region_x)
+        mouse_y = int(event.mouse_region_y)
+
+        # Build TRIS batches (uncached — evaluated meshes are cheap to
+        # retrieve and may change frame-to-frame due to IFC Boolean ops).
+        tri_batches: list[tuple[bpy.types.Object, GPUBatch]] = []
+        for obj, _bbox in on_screen_objs:
+            if obj.type != "MESH":
+                continue
+            batch = cls._build_tri_batch(obj)
+            if batch is not None:
+                tri_batches.append((obj, batch))
+
+        if not tri_batches:
+            return None
+
+        # Offscreen buffer (viewport-sized)
+        cls._ensure_offscreen(context)
+
+        rv3d = context.region_data
+        if rv3d is None:
+            return None
+
+        cls._ensure_shader()
+
+        with cls._offscreen.bind():
+            fb = active_framebuffer_get()
+            fb.clear(color=(0.0, 0.0, 0.0, 0.0), depth=1.0)
+
+            cls._gl_enable(depth=True)
+            cls.shader.bind()
+
+            # Sort back-to-front (farthest first) so the closest object
+            # overwrites farther ones in the depth buffer.
+            cam_pos = rv3d.view_matrix.inverted().translation
+            sorted_batches = sorted(
+                tri_batches,
+                key=lambda item: (item[0].matrix_world.translation - cam_pos).length_squared,
+                reverse=True,
+            )
+
+            for slot, (obj, batch) in enumerate(sorted_batches, start=1):
+                mvp = rv3d.perspective_matrix @ obj.matrix_world
+                cls.shader.uniform_float("MVP", mvp)
+                cls.shader.uniform_float("offset", float(slot))
+                with push_pop():
+                    load_matrix(mathutils.Matrix.Identity(4))
+                    batch.draw(cls.shader)
+
+            # Read single pixel under cursor (same coordinate system)
+            gl_x = max(0, min(mouse_x, w - 1))
+            gl_y = max(0, min(mouse_y, h - 1))
+            buf = fb.read_color(gl_x, gl_y, 1, 1, 4, 0, "UBYTE")
+
+        cls._gl_disable()
+
+        pixel = buf.to_list()
+        if not pixel or not pixel[0]:
+            return None
+
+        r, g, b, a = pixel[0][0]
+        val = cls._decode_pixel(r, g, b, a)
+        if val == 0:
+            return None
+
+        idx = val - 1
+        if 0 <= idx < len(sorted_batches):
+            return sorted_batches[idx][0]
+
+        return None
 
     # ---- Pixel decoding ----------------------------------------------------
 
@@ -1718,46 +1891,47 @@ class GPUSnap:
         if not region:
             return None
 
-        snap_r = cls.get_snap_radius_px()
         mouse_x = event.mouse_region_x
         mouse_y = event.mouse_region_y
 
-        # ── 1. Ensure batches exist for all on-screen objects ──
+        # ── Stage 1: Surface detection (TRIS + depth) ──
+        # If the mouse is over a mesh surface (not near any vertex/edge),
+        # detect_object() will find it.  We restrict subsequent POINTS/LINES
+        # scanning to that one object for efficiency.
+        hit_object = cls.detect_object(context, event, on_screen_objs)
+        if hit_object is None:
+            # Cursor over empty space — nothing to snap to
+            return None
+
+        relevant_objs = [(hit_object, None)]
+
+        snap_r = cls.get_snap_radius_px()
+
+        # ── 1. Ensure batches exist for the hit object ──
         n_built = 0
-        for obj, _bbox in on_screen_objs:
+        for obj, _bbox in relevant_objs:
             if cls.ensure_object_batches(obj):
                 n_built += 1
-        print(f"[GPUSnap] on_screen={len(on_screen_objs)} batches={len(cls._batches)} n_built={n_built}")
 
         # ── 2. Create / resize offscreen buffer to match viewport ──
         _buf_w, _buf_h = cls._ensure_offscreen(context)
         if _buf_w < 1 or _buf_h < 1:
             print(f"[GPUSnap] offscreen too small: {_buf_w}x{_buf_h}")
             return None
-        # OpenGL framebuffer has (0,0) at bottom-left, Blender region has (0,0) at top-left
-        gl_y = _buf_h - mouse_y if _buf_h > 0 else mouse_y
+        # OpenGL framebuffer has (0,0) at bottom-left — same as Blender's
+        # VIEW_3D mouse_region_x/y (confirmed in gpu_snap_test.py).
+        # No flip needed.
+        gl_y = mouse_y
 
-        # ── 3. Draw all objects to the full-viewport offscreen buffer ──
+        # ── 3. Draw POINTS+LINES (no depth, x-ray) for the hit object ──
         cls._next_offset = 1
 
-        # Sort objects front-to-back (closest last, so it overwrites farther ones)
-        # Without a depth buffer, draw order determines visibility
-        rv3d = context.region_data
-        if rv3d is not None:
-            cam_pos = rv3d.view_matrix.inverted().translation
-            sorted_objs = sorted(
-                on_screen_objs,
-                key=lambda item: (item[0].matrix_world.translation - cam_pos).length_squared,
-                reverse=True,  # farthest first → closest last → wins
-            )
-        else:
-            sorted_objs = on_screen_objs
-
+        # Only the surface-hit object is drawn — no need to sort
         with cls._offscreen.bind():
             fb = active_framebuffer_get()
             fb.clear(color=(0.0, 0.0, 0.0, 0.0))
 
-            cls._draw_all(context, sorted_objs)
+            cls._draw_all(context, relevant_objs)
 
             # ── 4. Read back a (2*snap_r+1)-pixel region around the mouse ──
             read_size = 2 * snap_r + 1
@@ -1791,11 +1965,9 @@ class GPUSnap:
         encoded_value, px, py = hit
         print(f"[GPUSnap] HIT! encoded={encoded_value} at pixel=({px},{py})")
 
-        # ── 5. Map the encoded value back to an object ──
-        # Walk through objects in draw order to find which object
-        # owns this offset range.
+        # ── 5. Map the encoded value back to a primitive ──
         running_offset = 1
-        for obj, _bbox in sorted_objs:
+        for obj, _bbox in relevant_objs:
             obj_batches = cls._batches.get(id(obj))
             if obj_batches is None:
                 continue
@@ -1815,8 +1987,9 @@ class GPUSnap:
 
                 running_offset += buf_size
 
-        print(f"[GPUSnap] encoded={encoded_value} matched NO object (total_offset={running_offset})")
-        return None
+        # Fallback: return hit with just the object; hit_proximity_data
+        # will scan all vertices/edges of the object when primitive_index < 0.
+        return SnapHit(object=hit_object, batch_type="POINTS", primitive_index=-1)
 
     # ---- Hit-to-geometry helpers ------------------------------------------
 
@@ -1832,15 +2005,21 @@ class GPUSnap:
         mw = obj.matrix_world
 
         if hit.batch_type == "POINTS":
-            return [mw @ obj.data.vertices[hit.primitive_index].co]
+            if hit.primitive_index >= 0:
+                return [mw @ obj.data.vertices[hit.primitive_index].co]
+            # primitive_index < 0 means "scan everything" — return empty
+            # so hit_proximity_data falls through to the full scan.
+            return []
 
         elif hit.batch_type == "LINES":
-            # primitive_index is the edge index into obj.data.edges
-            edge = obj.data.edges[hit.primitive_index]
-            return [
-                mw @ obj.data.vertices[edge.vertices[0]].co,
-                mw @ obj.data.vertices[edge.vertices[1]].co,
-            ]
+            if hit.primitive_index >= 0:
+                # primitive_index is the edge index into obj.data.edges
+                edge = obj.data.edges[hit.primitive_index]
+                return [
+                    mw @ obj.data.vertices[edge.vertices[0]].co,
+                    mw @ obj.data.vertices[edge.vertices[1]].co,
+                ]
+            return []
 
         return []
 
@@ -1868,17 +2047,101 @@ class GPUSnap:
         Only entries whose pixel distance is within the snap radius are
         returned (typically 0 or 1 entries for points, 0–3 for edges).
         """
-        coords = cls.hit_world_coords(hit)
-        if not coords:
-            return []
-
         region = context.region
         rv3d = context.region_data
         mouse_pos = Vector((event.mouse_region_x, event.mouse_region_y))
         snap_r = cls.get_snap_radius_px()
-        snap_r_sq = snap_r * snap_r
 
         result: list[dict] = []
+
+        # ── Fallback: scan ALL vertices/edges (primitive_index < 0) ──
+        if hit.primitive_index < 0:
+            obj = hit.object
+            if obj.type != "MESH" or not obj.data:
+                return []
+            mw = obj.matrix_world
+            snap_r_sq = snap_r * snap_r
+
+            # Check all vertices
+            for v in obj.data.vertices:
+                pt_world = mw @ v.co
+                pt2d = view3d_utils.location_3d_to_region_2d(region, rv3d, pt_world)
+                if pt2d is None:
+                    continue
+                dist_sq = (mouse_pos - pt2d).length_squared
+                if dist_sq <= snap_r_sq:
+                    result.append({
+                        "object": obj,
+                        "type": "Vertex",
+                        "point": pt_world,
+                        "distance": (mouse_pos - pt2d).length / 10,
+                    })
+
+            # Check all edges
+            for e in obj.data.edges:
+                v0 = mw @ obj.data.vertices[e.vertices[0]].co
+                v1 = mw @ obj.data.vertices[e.vertices[1]].co
+                v0_2d = view3d_utils.location_3d_to_region_2d(region, rv3d, v0)
+                v1_2d = view3d_utils.location_3d_to_region_2d(region, rv3d, v1)
+                if v0_2d is None and v1_2d is None:
+                    continue
+
+                if v0_2d is not None:
+                    d = (mouse_pos - v0_2d).length
+                    if d <= snap_r:
+                        result.append({
+                            "object": obj,
+                            "type": "Vertex",
+                            "point": v0,
+                            "distance": d / 10,
+                        })
+                if v1_2d is not None:
+                    d = (mouse_pos - v1_2d).length
+                    if d <= snap_r:
+                        result.append({
+                            "object": obj,
+                            "type": "Vertex",
+                            "point": v1,
+                            "distance": d / 10,
+                        })
+
+                # Midpoint
+                if v0_2d is not None and v1_2d is not None:
+                    mid_2d = (v0_2d + v1_2d) * 0.5
+                    d = (mouse_pos - mid_2d).length
+                    if d <= snap_r:
+                        result.append({
+                            "object": obj,
+                            "type": "Edge Center",
+                            "point": (v0 + v1) * 0.5,
+                            "distance": d,
+                        })
+
+                    # Edge projection
+                    seg = v1_2d - v0_2d
+                    seg_len_sq = seg.length_squared
+                    if seg_len_sq > 0:
+                        t = ((mouse_pos - v0_2d).dot(seg)) / seg_len_sq
+                        t_clamped = max(0.0, min(1.0, t))
+                        closest_2d = v0_2d.lerp(v1_2d, t_clamped)
+                        d = (mouse_pos - closest_2d).length
+                        if d <= snap_r:
+                            fac = t_clamped if t_clamped < 0.5 else 1.0 - t_clamped
+                            closest_3d = v0.lerp(v1, t_clamped)
+                            result.append({
+                                "object": obj,
+                                "type": "Edge",
+                                "point": closest_3d,
+                                "edge_verts": (v0, v1),
+                                "distance": d,
+                            })
+
+            return result
+
+        # ── Normal path: single primitive from GPU hit ──
+        coords = cls.hit_world_coords(hit)
+        if not coords:
+            return []
 
         if hit.batch_type == "POINTS":
             pt = coords[0]
