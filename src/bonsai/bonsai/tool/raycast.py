@@ -42,7 +42,7 @@ try:
         GPUShaderCreateInfo,
         GPUStageInterfaceInfo,
     )
-    from gpu.state import depth_mask_set, blend_set, line_width_set, point_size_set, active_framebuffer_get
+    from gpu.state import depth_mask_set, blend_set, line_width_set, point_size_set, active_framebuffer_get, finish
     from gpu.matrix import push_pop, load_matrix
     _HAS_GPU = True
 except Exception:
@@ -1743,6 +1743,7 @@ class GPUSnap:
             fb.clear(color=(0.0, 0.0, 0.0, 0.0))
 
             cls._draw_all(context, on_screen_objs)
+            finish()  # ensure drawing is complete before readback
 
             # ── 4. Read back a (2*snap_r+1)-pixel region around the mouse ──
             read_size = 2 * snap_r + 1
