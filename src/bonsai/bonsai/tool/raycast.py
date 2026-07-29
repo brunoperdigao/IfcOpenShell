@@ -1721,8 +1721,6 @@ class GPUSnap:
         snap_r = cls.get_snap_radius_px()
         mouse_x = event.mouse_region_x
         mouse_y = event.mouse_region_y
-        # OpenGL framebuffer has (0,0) at bottom-left, Blender region has (0,0) at top-left
-        gl_y = _buf_h - mouse_y if _buf_h > 0 else mouse_y
 
         # ── 1. Ensure batches exist for all on-screen objects ──
         n_built = 0
@@ -1736,6 +1734,8 @@ class GPUSnap:
         if _buf_w < 1 or _buf_h < 1:
             print(f"[GPUSnap] offscreen too small: {_buf_w}x{_buf_h}")
             return None
+        # OpenGL framebuffer has (0,0) at bottom-left, Blender region has (0,0) at top-left
+        gl_y = _buf_h - mouse_y if _buf_h > 0 else mouse_y
 
         # ── 3. Draw all objects to the full-viewport offscreen buffer ──
         cls._next_offset = 1
