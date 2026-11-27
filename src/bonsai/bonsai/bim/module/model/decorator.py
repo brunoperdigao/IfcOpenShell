@@ -536,6 +536,11 @@ class PolylineDecorator(tool.Blender.ViewportDecorator):
 
             if formatted_value is None:
                 continue
+            if self.tool_state and (
+                (key == "L" and self.tool_state.rectangle_locked_length is not None)
+                or (key == "W" and self.tool_state.rectangle_locked_width is not None)
+            ):
+                formatted_value += " (locked)"
             if self.tool_state and key == self.tool_state.input_type:
                 blf.color(self.font_id, *color_highlight)
             else:
@@ -981,7 +986,11 @@ class PolylineDecorator(tool.Blender.ViewportDecorator):
         if tool.Polyline.is_rectangle_mode(self.tool_state) and polyline_verts:
             anchor = polyline_verts[0]
             corner = None
-            if self.tool_state.is_input_on:
+            is_locked = (
+                self.tool_state.rectangle_locked_length is not None
+                or self.tool_state.rectangle_locked_width is not None
+            )
+            if self.tool_state.is_input_on or is_locked:
                 x = self.input_ui.get_number_value("X")
                 y = self.input_ui.get_number_value("Y")
                 if x != "" and y != "":
