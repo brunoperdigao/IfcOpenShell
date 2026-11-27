@@ -100,6 +100,19 @@ class PolylineOperator:
     def is_rectangle_mode(self) -> bool:
         return self.enable_rectangle and tool.Polyline.is_rectangle_mode(self.tool_state)
 
+    def clear_rectangle_locks(self) -> None:
+        self.tool_state.rectangle_locked_length = None
+        self.tool_state.rectangle_locked_width = None
+
+    def get_first_input_option(self) -> str:
+        # In rectangle mode, start typing in the first dimension that isn't locked yet
+        if self.is_rectangle_mode():
+            locks = {"L": self.tool_state.rectangle_locked_length, "W": self.tool_state.rectangle_locked_width}
+            for option in self.input_options:
+                if locks.get(option) is None:
+                    return option
+        return self.input_options[0]
+
     def set_input_options(self, options: list[str], remap: dict = {}) -> None:
         self.input_options = options
         self.input_ui.input_options = options
@@ -208,6 +221,7 @@ class PolylineOperator:
                 polyline_settings.drawing_type = "POLYLINE"
                 self.set_input_options(self.polyline_input_options, {"L": "D", "W": "X"})
             polyline_settings.rectangle_angle = 0.0
+            self.clear_rectangle_locks()
             self.input_ui.set_value("A", 0)
             PolylineDecorator.update(event, self.tool_state, self.input_ui, self.snapping_points[0])
             tool.Blender.update_viewport()
@@ -291,8 +305,8 @@ class PolylineOperator:
             self.recalculate_inputs(context)
             self.tool_state.mode = "Select"
             self.tool_state.is_input_on = True
-            self.input_type = self.input_options[0]
-            self.tool_state.input_type = self.input_options[0]
+            self.input_type = self.get_first_input_option()
+            self.tool_state.input_type = self.input_type
             self.is_typing = False
             self.number_input = self.input_ui.get_formatted_value(self.input_type)
             self.number_input = list(self.number_input)
@@ -305,8 +319,8 @@ class PolylineOperator:
             self.recalculate_inputs(context)
             self.tool_state.mode = "Edit"
             self.tool_state.is_input_on = True
-            self.input_type = self.input_options[0]
-            self.tool_state.input_type = self.input_options[0]
+            self.input_type = self.get_first_input_option()
+            self.tool_state.input_type = self.input_type
             PolylineDecorator.update(event, self.tool_state, self.input_ui, self.snapping_points[0])
             tool.Blender.update_viewport()
 
@@ -357,11 +371,13 @@ class PolylineOperator:
             if self.is_rectangle_mode() and len(polyline_points) >= 2:
                 tool.Polyline.remove_last_polyline_point()
                 result = tool.Polyline.insert_polyline_point(self.input_ui, self.tool_state)
+                self.clear_rectangle_locks()
                 tool.Blender.update_viewport()
             else:
                 result = tool.Polyline.insert_polyline_point(self.input_ui, self.tool_state)
                 if result:
                     self.report({"WARNING"}, result)
+                self.clear_rectangle_locks()
                 tool.Blender.update_viewport()
 
         if event.value == "PRESS" and event.type == "C":
@@ -393,7 +409,21 @@ class PolylineOperator:
             and event.type in {"RET", "NUMPAD_ENTER", "RIGHTMOUSE"}
         ):
             is_valid = self.recalculate_inputs(context)
-            if is_valid:
+            if is_valid and self.is_rectangle_mode() and polyline_points:
+                # Enter locks the typed dimension; the corner is placed once both are locked
+                if self.input_type == "L":
+                    self.tool_state.rectangle_locked_length = self.input_ui.get_number_value("L")
+                elif self.input_type == "W":
+                    self.tool_state.rectangle_locked_width = self.input_ui.get_number_value("W")
+                if (
+                    self.tool_state.rectangle_locked_length is not None
+                    and self.tool_state.rectangle_locked_width is not None
+                ):
+                    if len(polyline_points) >= 2:
+                        tool.Polyline.remove_last_polyline_point()
+                    tool.Polyline.insert_polyline_point(self.input_ui, self.tool_state)
+                    self.clear_rectangle_locks()
+            elif is_valid:
                 result = tool.Polyline.insert_polyline_point(self.input_ui, self.tool_state)
                 if result:
                     self.report({"WARNING"}, result)
@@ -410,6 +440,7 @@ class PolylineOperator:
         if not self.tool_state.is_input_on:
             if event.value == "RELEASE" and event.type == "BACK_SPACE":
                 tool.Polyline.remove_last_polyline_point()
+                self.clear_rectangle_locks()
                 tool.Blender.update_viewport()
 
     def handle_snap_selection(self, context: bpy.types.Context, event: bpy.types.Event) -> None:

@@ -80,6 +80,9 @@ class Polyline(bonsai.core.tool.Polyline):
         is_input_on: bool = None
         lock_axis: bool = False
         supports_rectangle: bool = False
+        # Rectangle mode: dimensions confirmed with Enter, kept while the mouse drives the other one
+        rectangle_locked_length: Optional[float] = None
+        rectangle_locked_width: Optional[float] = None
         # angle_axis_start: Vector
         # angle_axis_end: Vector
         axis_method: Literal["X", "Y", "Z", None] = None
@@ -672,6 +675,15 @@ class Polyline(bonsai.core.tool.Polyline):
         if anchor is None:
             return
         length, width = cls.get_rectangle_dimensions(anchor, corner)
+        if tool_state.rectangle_locked_length is not None or tool_state.rectangle_locked_width is not None:
+            if tool_state.rectangle_locked_length is not None:
+                length = tool_state.rectangle_locked_length
+            if tool_state.rectangle_locked_width is not None:
+                width = tool_state.rectangle_locked_width
+            e_l, e_w = cls.get_rectangle_axes(tool.Model.get_polyline_settings().rectangle_angle)
+            corner = Vector((anchor.x + e_l.x * length + e_w.x * width, anchor.y + e_l.y * length + e_w.y * width, z))
+            input_ui.set_value("X", corner.x)
+            input_ui.set_value("Y", corner.y)
         input_ui.set_value("L", length)
         input_ui.set_value("W", width)
         input_ui.set_value("WORLD_ANGLE", math.degrees(math.atan2(corner.y - anchor.y, corner.x - anchor.x)))
@@ -695,6 +707,17 @@ class Polyline(bonsai.core.tool.Polyline):
         w_text = input_ui.get_text_value("W")
         length = float(l_text) if l_text else 0.0
         width = float(w_text) if w_text else 0.0
+        # A typed positive dimension follows the side of the first corner the mouse is on
+        snap_prop = tool.Model.get_polyline_props().snap_mouse_point[0]
+        mouse_length, mouse_width = cls.get_rectangle_dimensions(anchor, Vector((snap_prop.x, snap_prop.y, 0.0)))
+        if tool_state.input_type == "L" and length > 0 and mouse_length < 0:
+            length = -length
+        if tool_state.input_type == "W" and width > 0 and mouse_width < 0:
+            width = -width
+        if tool_state.input_type != "L" and tool_state.rectangle_locked_length is not None:
+            length = tool_state.rectangle_locked_length
+        if tool_state.input_type != "W" and tool_state.rectangle_locked_width is not None:
+            width = tool_state.rectangle_locked_width
         e_l, e_w = cls.get_rectangle_axes(angle)
         corner = anchor + Vector((e_l.x * length + e_w.x * width, e_l.y * length + e_w.y * width, 0.0))
         corner.z = anchor.z
